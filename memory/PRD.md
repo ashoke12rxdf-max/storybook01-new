@@ -102,14 +102,34 @@ REACT_APP_BACKEND_URL=https://your-railway-url.railway.app
 
 ## Load History
 
-### April 2, 2026 - Loaded from GitHub
+### April 2, 2026 - Loaded from GitHub + Phase 2 Implemented
 - Cloned from `https://github.com/plannersandjournal0-wq/story-vault-new-feature`
-- Copied all backend/frontend code preserving .env files
-- Installed Python deps (requirements.txt) and frontend deps (yarn)
-- Services restarted and verified running
+- Phase 2 completed: Admin Visual Editor (Fabric.js)
 
-## Known Issues / Notes
+## Phase 2 Implementation (April 2, 2026)
+
+### Features Added
+1. **SpreadBlockEditor** (`/admin/templates/:templateId/spread-editor`)
+   - Fabric.js 5.3.0 canvas for visual block placement
+   - Left panel: Page selector (all spreads listed)
+   - Center: Fabric canvas with background spread images
+   - Right panel: Block config (font, size, bold/italic, color, alignment)
+   - Preview mode: replaces `[field_key]` with sample values
+   - Save button: PUT /api/admin/templates/:id/spreads/:spreadId/blocks
+   - Token validation: green badge for valid fields, red warning for unknown
+
+2. **Field Definitions Tab** in TemplateManagement modal
+   - New 3rd tab alongside Field Mapping and Default Styling
+   - Add/edit/delete field definitions inline
+   - Reorder with up/down buttons
+   - Saved to template via PUT /api/templates/:id
+
+3. **Edit Spread Layout Button** on TemplateCard
+   - Layers icon navigates to spread editor route
+
+### Known Issues / Notes
 
 1. **Email URLs**: Ensure `APP_BASE_URL` is set correctly on Railway
 2. **Admin Access**: Now open without password - add proper auth if needed for production
 3. **Review Duplicates**: Prevented per browser session only (not per user account)
+4. **Spread blocks vs PDF overlay**: `spread_blocks` are stored visually; actual PDF overlay rendering is future work
