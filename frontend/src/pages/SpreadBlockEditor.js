@@ -4,19 +4,23 @@ import { fabric } from 'fabric';
 import {
   ChevronLeft, Plus, Trash2, Eye, EyeOff, Save, Loader2,
   AlignLeft, AlignCenter, AlignRight, Bold, Italic, Type,
-  Layers, MousePointer, Info
+  Layers, MousePointer, Info, X, ZoomIn, Download, RefreshCw,
+  ChevronUp, ChevronDown, Settings
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 const CANVAS_MAX_WIDTH = 780;
+const FIELD_TYPES = ['text', 'textarea', 'image', 'date', 'select'];
 
 const genId = () => `blk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
+// ── Main Component ─────────────────────────────────────────────────────────────
 function SpreadBlockEditor() {
   const { templateId } = useParams();
   const navigate = useNavigate();
 
+  // Core state
   const [template, setTemplate] = useState(null);
   const [spreads, setSpreads] = useState([]);
   const [fieldDefs, setFieldDefs] = useState([]);
@@ -27,20 +31,27 @@ function SpreadBlockEditor() {
   const [loading, setLoading] = useState(true);
   const [canvasReady, setCanvasReady] = useState(false);
 
+  // Right panel
+  const [rightTab, setRightTab] = useState('block'); // 'block' | 'fields'
+  const [quickDefineKey, setQuickDefineKey] = useState(null); // pre-fill key in Fields tab
+
+  // Preview modal
+  const [previewDataUrl, setPreviewDataUrl] = useState(null);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [generatingPreview, setGeneratingPreview] = useState(false);
+
+  // Fabric refs
   const canvasRef = useRef(null);
   const fabricRef = useRef(null);
   const scaleRef = useRef(1);
   const isLoadingRef = useRef(false);
 
-  // ── Initialize Fabric Canvas ──────────────────────────────────────────
-  // NOTE: Must depend on `loading` because canvas is not in DOM during loading state
+  // ── Init Fabric Canvas ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (loading) return; // Canvas not in DOM yet
-    if (fabricRef.current) { return; }
-    const canvasEl = canvasRef.current;
-    if (!canvasEl) return;
+    if (loading) return;
+    if (!canvasRef.current || fabricRef.current) return;
 
-    const canvas = new fabric.Canvas(canvasEl, {
+    const canvas = new fabric.Canvas(canvasRef.current, {
       width: CANVAS_MAX_WIDTH,
       height: 520,
       backgroundColor: '#e5e7eb',
@@ -50,7 +61,10 @@ function SpreadBlockEditor() {
     setCanvasReady(true);
 
     const onSelect = ({ selected }) => {
-      if (selected?.[0]?.data) setSelectedBlockData({ ...selected[0].data });
+      if (selected?.[0]?.data) {
+        setSelectedBlockData({ ...selected[0].data });
+        setRightTab('block');
+      }
     };
     const onClear = () => setSelectedBlockData(null);
     const onModified = ({ target }) => {
@@ -58,6 +72,7 @@ function SpreadBlockEditor() {
       const s = scaleRef.current;
       const w = (target.width || 200) * (target.scaleX || 1);
       const h = (target.height || 50) * (target.scaleY || 1);
+      target.set({ scaleX: 1, scaleY: 1 });
       target.data = {
         ...target.data,
         x: Math.round(target.left / s),
@@ -66,8 +81,6 @@ function SpreadBlockEditor() {
         height: Math.round(h / s),
         rotation: Math.round(target.angle || 0),
       };
-      // Reset scale after baking into width/height
-      target.set({ scaleX: 1, scaleY: 1 });
       setSelectedBlockData({ ...target.data });
     };
 
@@ -86,7 +99,7 @@ function SpreadBlockEditor() {
     };
   }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Fetch Template & Spreads ──────────────────────────────────────────
+  // ── Load Template + Spreads ──────────────────────────────────────────────────
   useEffect(() => {
     const load = async () => {
       try {
@@ -108,20 +121,19 @@ function SpreadBlockEditor() {
     load();
   }, [templateId]);
 
-  // ── Load Spread to Canvas ─────────────────────────────────────────────
-  const applyPreviewText = useCallback((template_text) => {
-    return template_text.replace(/\[(\w+)\]/g, (_, key) => {
+  // ── Preview text helper ──────────────────────────────────────────────────────
+  const applyPreviewText = useCallback((tmpl = '') =>
+    tmpl.replace(/\[(\w+)\]/g, (_, key) => {
       const def = fieldDefs.find(f => f.field_key === key);
-      return def?.placeholder || `[${key}]`;
-    });
-  }, [fieldDefs]);
+      return def?.placeholder || `«${key}»`;
+    }), [fieldDefs]);
 
+  // ── Load blocks onto canvas ──────────────────────────────────────────────────
   const loadBlocksToCanvas = useCallback((blocks) => {
     const canvas = fabricRef.current;
     if (!canvas) return;
     const s = scaleRef.current;
-
-    canvas.getObjects().forEach(obj => canvas.remove(obj));
+    canvas.getObjects().forEach(o => canvas.remove(o));
 
     blocks.forEach(block => {
       if (block.type !== 'text') return;
@@ -132,8 +144,8 @@ function SpreadBlockEditor() {
       const tbox = new fabric.Textbox(displayText, {
         left: (block.x || 0) * s,
         top: (block.y || 0) * s,
-        width: (block.width || 200) * s,
-        fontSize: Math.max(10, Math.round((block.font_size || 24) * s)),
+        width: Math.max(40, (block.width || 200) * s),
+        fontSize: Math.max(8, Math.round((block.font_size || 24) * s)),
         fontFamily: block.font_family || 'Helvetica',
         fontWeight: block.font_weight || 'normal',
         fontStyle: block.italic ? 'italic' : 'normal',
@@ -141,21 +153,18 @@ function SpreadBlockEditor() {
         textAlign: block.alignment || 'left',
         angle: block.rotation || 0,
         editable: false,
-        hasControls: true,
-        hasBorders: true,
         borderColor: '#7c3aed',
         cornerColor: '#7c3aed',
         cornerSize: 8,
         transparentCorners: false,
         data: { ...block },
       });
-
       canvas.add(tbox);
     });
-
     canvas.renderAll();
   }, [isPreview, applyPreviewText]);
 
+  // ── Load spread image + blocks ───────────────────────────────────────────────
   const loadSpread = useCallback((spreadId) => {
     const canvas = fabricRef.current;
     if (!canvas || isLoadingRef.current) return;
@@ -163,7 +172,7 @@ function SpreadBlockEditor() {
     const spread = spreads.find(s => s.spread_id === spreadId);
     isLoadingRef.current = true;
 
-    canvas.getObjects().forEach(obj => canvas.remove(obj));
+    canvas.getObjects().forEach(o => canvas.remove(o));
     canvas.setBackgroundImage(null, () => {});
 
     if (!spread?.spread_image_url) {
@@ -178,20 +187,12 @@ function SpreadBlockEditor() {
     }
 
     const url = `${API_URL}${spread.spread_image_url}`;
-
     fabric.Image.fromURL(url, (img) => {
-      if (!img) {
-        canvas.renderAll();
-        isLoadingRef.current = false;
-        return;
-      }
+      if (!img) { canvas.renderAll(); isLoadingRef.current = false; return; }
       const scale = CANVAS_MAX_WIDTH / img.width;
-      const canvasH = Math.round(img.height * scale);
       scaleRef.current = scale;
-
       canvas.setWidth(CANVAS_MAX_WIDTH);
-      canvas.setHeight(canvasH);
-
+      canvas.setHeight(Math.round(img.height * scale));
       canvas.setBackgroundImage(img, () => {
         canvas.renderAll();
         loadBlocksToCanvas(spread.blocks || []);
@@ -201,74 +202,55 @@ function SpreadBlockEditor() {
   }, [spreads, loadBlocksToCanvas]);
 
   useEffect(() => {
-    if (canvasReady && spreads.length > 0) {
-      loadSpread(currentSpreadId);
-    }
+    if (canvasReady && spreads.length > 0) loadSpread(currentSpreadId);
   }, [currentSpreadId, spreads, canvasReady, loadSpread]);
 
-  // Re-render when preview toggles
   useEffect(() => {
     if (!canvasReady || spreads.length === 0) return;
     const spread = spreads.find(s => s.spread_id === currentSpreadId);
-    if (!spread) return;
-    loadBlocksToCanvas(spread.blocks || []);
-  }, [isPreview, canvasReady, currentSpreadId, spreads, loadBlocksToCanvas]);
+    if (spread) loadBlocksToCanvas(spread.blocks || []);
+  }, [isPreview, canvasReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Add Block ─────────────────────────────────────────────────────────
+  // ── Add Text Block ───────────────────────────────────────────────────────────
   const addTextBlock = () => {
     const canvas = fabricRef.current;
     if (!canvas) return;
     const s = scaleRef.current;
-
     const block = {
       spread_id: currentSpreadId,
       block_id: genId(),
       type: 'text',
       x: Math.round(canvas.width / 2 / s) - 100,
-      y: Math.round(canvas.height / 2 / s) - 25,
-      width: 200,
-      height: 50,
+      y: Math.round(canvas.height / 2 / s) - 20,
+      width: 200, height: 50,
       text_template: 'Enter text or use [field_key]',
-      font_family: 'Helvetica',
-      font_size: 24,
-      font_weight: 'normal',
-      italic: false,
-      color: '#000000',
-      alignment: 'center',
-      max_lines: 2,
-      overflow_behavior: 'shrink',
-      rotation: 0,
-      z_index: 1,
-      allowed_fields: [],
+      font_family: 'Helvetica', font_size: 24,
+      font_weight: 'normal', italic: false,
+      color: '#000000', alignment: 'center',
+      max_lines: 2, overflow_behavior: 'shrink',
+      rotation: 0, z_index: 1, allowed_fields: [],
     };
-
     const tbox = new fabric.Textbox(block.text_template, {
-      left: block.x * s,
-      top: block.y * s,
+      left: block.x * s, top: block.y * s,
       width: block.width * s,
       fontSize: Math.round(block.font_size * s),
-      fontFamily: block.font_family,
-      fill: block.color,
-      textAlign: block.alignment,
-      editable: false,
-      borderColor: '#7c3aed',
-      cornerColor: '#7c3aed',
-      cornerSize: 8,
-      transparentCorners: false,
+      fontFamily: block.font_family, fill: block.color,
+      textAlign: block.alignment, editable: false,
+      borderColor: '#7c3aed', cornerColor: '#7c3aed',
+      cornerSize: 8, transparentCorners: false,
       data: block,
     });
-
     canvas.add(tbox);
     canvas.setActiveObject(tbox);
     canvas.renderAll();
     setSelectedBlockData({ ...block });
+    setRightTab('block');
   };
 
-  // ── Delete Selected Block ─────────────────────────────────────────────
-  const deleteSelectedBlock = () => {
+  // ── Delete Selected Block ────────────────────────────────────────────────────
+  const deleteSelected = () => {
     const canvas = fabricRef.current;
-    if (!canvas) return;
-    const active = canvas.getActiveObject();
+    const active = canvas?.getActiveObject();
     if (!active) return;
     canvas.remove(active);
     canvas.renderAll();
@@ -276,14 +258,12 @@ function SpreadBlockEditor() {
     toast.success('Block removed');
   };
 
-  // ── Update Block Property ─────────────────────────────────────────────
+  // ── Update Block Property ────────────────────────────────────────────────────
   const updateBlockProp = (field, value) => {
     const canvas = fabricRef.current;
     const active = canvas?.getActiveObject();
     if (!active?.data) return;
-
     const s = scaleRef.current;
-
     switch (field) {
       case 'text_template':
         active.set('text', isPreview ? applyPreviewText(value) : value);
@@ -291,35 +271,39 @@ function SpreadBlockEditor() {
       case 'font_size':
         active.set('fontSize', Math.max(6, Math.round(Number(value) * s)));
         break;
-      case 'font_family':
-        active.set('fontFamily', value);
-        break;
-      case 'font_weight':
-        active.set('fontWeight', value);
-        break;
-      case 'italic':
-        active.set('fontStyle', value ? 'italic' : 'normal');
-        break;
-      case 'color':
-        active.set('fill', value);
-        break;
-      case 'alignment':
-        active.set('textAlign', value);
-        break;
+      case 'font_family': active.set('fontFamily', value); break;
+      case 'font_weight': active.set('fontWeight', value); break;
+      case 'italic': active.set('fontStyle', value ? 'italic' : 'normal'); break;
+      case 'color': active.set('fill', value); break;
+      case 'alignment': active.set('textAlign', value); break;
       default: break;
     }
-
     active.data = { ...active.data, [field]: value };
     canvas.renderAll();
     setSelectedBlockData(prev => ({ ...prev, [field]: value }));
   };
 
-  // ── Save Spread Blocks ────────────────────────────────────────────────
+  // ── Save Field Definitions ───────────────────────────────────────────────────
+  const saveFieldDefs = async (newDefs) => {
+    try {
+      const res = await fetch(`${API_URL}/api/templates/${templateId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field_definitions: newDefs }),
+      });
+      if (!res.ok) throw new Error('Save failed');
+      setFieldDefs(newDefs);
+      toast.success('Fields saved');
+    } catch {
+      toast.error('Failed to save fields');
+    }
+  };
+
+  // ── Save Spread Blocks ───────────────────────────────────────────────────────
   const saveBlocks = async () => {
     const canvas = fabricRef.current;
     if (!canvas) return;
     setSaving(true);
-
     const s = scaleRef.current;
     const blocks = canvas.getObjects()
       .filter(obj => obj.data?.block_id)
@@ -344,19 +328,12 @@ function SpreadBlockEditor() {
         z_index: obj.data.z_index || 1,
         allowed_fields: obj.data.allowed_fields || [],
       }));
-
     try {
       const res = await fetch(
         `${API_URL}/api/admin/templates/${templateId}/spreads/${currentSpreadId}/blocks`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(blocks),
-        }
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(blocks) }
       );
-      if (!res.ok) throw new Error('Save failed');
-
-      // Update local spreads state
+      if (!res.ok) throw new Error();
       setSpreads(prev => prev.map(s =>
         s.spread_id === currentSpreadId ? { ...s, blocks } : s
       ));
@@ -368,14 +345,49 @@ function SpreadBlockEditor() {
     }
   };
 
-  // ── Helpers ───────────────────────────────────────────────────────────
-  const getTokensInText = (text = '') => {
-    const matches = text.match(/\[(\w+)\]/g) || [];
-    return [...new Set(matches.map(m => m.slice(1, -1)))];
+  // ── Full Preview ─────────────────────────────────────────────────────────────
+  const showFullPreview = () => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    setGeneratingPreview(true);
+
+    // Temporarily apply preview text to all blocks
+    const backups = [];
+    canvas.getObjects().forEach(obj => {
+      if (obj.data?.text_template) {
+        backups.push({ obj, text: obj.text });
+        obj.set('text', applyPreviewText(obj.data.text_template));
+      }
+    });
+    canvas.renderAll();
+
+    // Capture at 2× resolution
+    setTimeout(() => {
+      const dataUrl = canvas.toDataURL({ format: 'jpeg', quality: 0.9, multiplier: 2 });
+      setPreviewDataUrl(dataUrl);
+      setShowPreviewModal(true);
+      setGeneratingPreview(false);
+
+      // Restore edit text if not in preview mode
+      if (!isPreview) {
+        backups.forEach(({ obj, text }) => obj.set('text', text));
+        canvas.renderAll();
+      }
+    }, 80);
   };
+
+  // ── Quick Define from Block Config ───────────────────────────────────────────
+  const handleQuickDefine = (key) => {
+    setQuickDefineKey(key);
+    setRightTab('fields');
+  };
+
+  const getTokensInText = (text = '') =>
+    [...new Set((text.match(/\[(\w+)\]/g) || []).map(m => m.slice(1, -1)))];
 
   const isValidToken = (key) => fieldDefs.some(f => f.field_key === key);
 
+  // ── Loading state ────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
@@ -387,17 +399,17 @@ function SpreadBlockEditor() {
     );
   }
 
-  const currentSpread = spreads.find(s => s.spread_id === currentSpreadId);
   const totalBlocks = spreads.reduce((acc, s) => acc + (s.blocks?.length || 0), 0);
 
   return (
     <div className="h-screen flex flex-col bg-gray-100 overflow-hidden" data-testid="spread-block-editor">
+
       {/* ── Header ── */}
-      <div className="bg-white border-b border-gray-200 shadow-sm flex items-center justify-between px-4 py-3 flex-shrink-0">
+      <div className="bg-white border-b border-gray-200 shadow-sm flex items-center justify-between px-4 py-2.5 flex-shrink-0">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/admin')}
-            className="flex items-center gap-1 text-gray-600 hover:text-gray-900 transition-colors"
+            className="flex items-center gap-1 text-gray-500 hover:text-gray-900 transition-colors"
             data-testid="back-btn"
           >
             <ChevronLeft size={18} />
@@ -405,22 +417,39 @@ function SpreadBlockEditor() {
           </button>
           <div className="w-px h-5 bg-gray-200" />
           <div>
-            <h1 className="font-semibold text-gray-900 text-sm">{template?.title || 'Template'}</h1>
-            <p className="text-xs text-gray-500">Spread Block Editor · {totalBlocks} blocks total</p>
+            <h1 className="font-semibold text-gray-900 text-sm leading-tight">{template?.title || 'Template'}</h1>
+            <p className="text-xs text-gray-400">
+              Spread Editor · {totalBlocks} blocks · {fieldDefs.length} fields
+            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Full Preview */}
+          <button
+            onClick={showFullPreview}
+            disabled={generatingPreview}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 border border-blue-200 transition-colors disabled:opacity-50"
+            data-testid="full-preview-btn"
+            title="See how this page looks to your customer"
+          >
+            {generatingPreview
+              ? <Loader2 size={14} className="animate-spin" />
+              : <ZoomIn size={14} />}
+            Full Preview
+          </button>
+
+          {/* Edit/Preview toggle */}
           <button
             onClick={() => setIsPreview(p => !p)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
               isPreview
                 ? 'bg-amber-100 text-amber-700 border border-amber-200'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
             data-testid="preview-toggle"
           >
-            {isPreview ? <EyeOff size={15} /> : <Eye size={15} />}
+            {isPreview ? <EyeOff size={14} /> : <Eye size={14} />}
             {isPreview ? 'Edit Mode' : 'Preview'}
           </button>
 
@@ -430,7 +459,7 @@ function SpreadBlockEditor() {
             className="flex items-center gap-1.5 px-4 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors disabled:opacity-60"
             data-testid="save-blocks-btn"
           >
-            {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             Save Page
           </button>
         </div>
@@ -440,23 +469,22 @@ function SpreadBlockEditor() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* Left: Spread List */}
-        <div className="w-44 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
+        <div className="w-40 bg-white border-r border-gray-200 flex flex-col overflow-hidden flex-shrink-0">
           <div className="px-3 py-2 border-b border-gray-100">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Pages</p>
           </div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
             {spreads.map(spread => (
               <button
                 key={spread.spread_id}
                 onClick={() => setCurrentSpreadId(spread.spread_id)}
-                className={`w-full rounded-lg border-2 transition-all p-1.5 text-left ${
+                className={`w-full rounded-lg border-2 transition-all p-1 text-left ${
                   currentSpreadId === spread.spread_id
                     ? 'border-purple-500 bg-purple-50'
                     : 'border-gray-100 hover:border-purple-200 hover:bg-gray-50'
                 }`}
                 data-testid={`spread-${spread.spread_id}`}
               >
-                {/* Thumbnail */}
                 <div className="w-full aspect-video bg-gray-100 rounded overflow-hidden mb-1">
                   {spread.spread_image_url ? (
                     <img
@@ -466,26 +494,25 @@ function SpreadBlockEditor() {
                       crossOrigin="anonymous"
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-400">
-                      <Layers size={16} />
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Layers size={14} className="text-gray-300" />
                     </div>
                   )}
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-gray-700">Page {spread.spread_id + 1}</span>
+                <div className="flex items-center justify-between px-0.5">
+                  <span className="text-xs font-medium text-gray-600">pg {spread.spread_id + 1}</span>
                   {(spread.blocks?.length || 0) > 0 && (
-                    <span className="text-xs bg-purple-100 text-purple-600 rounded-full px-1.5">
+                    <span className="text-xs bg-purple-100 text-purple-600 rounded-full px-1">
                       {spread.blocks.length}
                     </span>
                   )}
                 </div>
               </button>
             ))}
-
             {spreads.length === 0 && (
-              <div className="text-center py-8 text-gray-400">
-                <Layers size={24} className="mx-auto mb-2" />
-                <p className="text-xs">No pages yet</p>
+              <div className="text-center py-6 text-gray-300">
+                <Layers size={20} className="mx-auto mb-1" />
+                <p className="text-xs">No pages</p>
               </div>
             )}
           </div>
@@ -493,151 +520,217 @@ function SpreadBlockEditor() {
 
         {/* Center: Canvas */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Canvas Toolbar */}
-          <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-3 flex-shrink-0">
+          {/* Toolbar */}
+          <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-2 flex-shrink-0">
             <button
               onClick={addTextBlock}
               disabled={isPreview}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors disabled:opacity-50"
               data-testid="add-text-block-btn"
             >
-              <Plus size={15} />
+              <Plus size={14} />
               Add Text Block
             </button>
-
             {selectedBlockData && !isPreview && (
               <button
-                onClick={deleteSelectedBlock}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors border border-red-200"
+                onClick={deleteSelected}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-sm hover:bg-red-100 border border-red-200 transition-colors"
                 data-testid="delete-block-btn"
               >
-                <Trash2 size={15} />
-                Delete Block
+                <Trash2 size={14} />
+                Delete
               </button>
             )}
-
             <div className="flex-1" />
-            <p className="text-xs text-gray-400">
-              Page {currentSpreadId + 1} of {spreads.length}
-              {selectedBlockData && <span className="ml-2 text-purple-600">· Block selected</span>}
-            </p>
+            <span className="text-xs text-gray-400">
+              Page {currentSpreadId + 1} / {spreads.length}
+              {selectedBlockData && <span className="ml-2 text-purple-500">· block selected</span>}
+            </span>
           </div>
 
-          {/* Canvas Scroll Area */}
+          {/* Canvas scroll area */}
           <div className="flex-1 overflow-auto p-4 flex items-start justify-center bg-gray-200">
             <div className="shadow-xl rounded overflow-hidden" data-testid="canvas-container">
               <canvas ref={canvasRef} />
             </div>
           </div>
 
-          {/* Canvas hint */}
+          {/* Hint bar */}
           {!isPreview && (
-            <div className="bg-white border-t border-gray-100 px-4 py-2 flex items-center gap-2 text-xs text-gray-400 flex-shrink-0">
-              <MousePointer size={12} />
+            <div className="bg-white border-t border-gray-100 px-4 py-1.5 flex items-center gap-2 text-xs text-gray-400 flex-shrink-0">
+              <MousePointer size={11} />
               Click to select · Drag to move · Handles to resize
             </div>
           )}
         </div>
 
-        {/* Right: Block Config Panel */}
-        <div className="w-64 bg-white border-l border-gray-200 flex flex-col overflow-hidden">
-          {selectedBlockData && !isPreview ? (
-            <BlockConfigPanel
-              block={selectedBlockData}
-              fieldDefs={fieldDefs}
-              onUpdate={updateBlockProp}
-              onDelete={deleteSelectedBlock}
-              getTokensInText={getTokensInText}
-              isValidToken={isValidToken}
-            />
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-gray-400">
-              {isPreview ? (
-                <>
-                  <Eye size={32} className="mb-3 text-amber-400" />
-                  <p className="text-sm font-medium text-amber-600">Preview Mode</p>
-                  <p className="text-xs mt-1">Showing field placeholders replaced with sample values</p>
-                </>
-              ) : (
-                <>
-                  <Type size={32} className="mb-3" />
-                  <p className="text-sm font-medium text-gray-600">No block selected</p>
-                  <p className="text-xs mt-1">Click a block on the canvas or add a new one</p>
-                  {fieldDefs.length > 0 && (
-                    <div className="mt-4 p-3 bg-purple-50 rounded-lg text-left w-full">
-                      <p className="text-xs font-semibold text-purple-700 mb-2">Available tokens:</p>
-                      <div className="flex flex-wrap gap-1">
-                        {fieldDefs.map(f => (
-                          <span key={f.field_key} className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-mono">
-                            [{f.field_key}]
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
+        {/* Right: Block Config + Field Definitions */}
+        <div className="w-72 bg-white border-l border-gray-200 flex flex-col overflow-hidden flex-shrink-0">
+          {/* Tab headers */}
+          <div className="flex border-b border-gray-200">
+            <button
+              onClick={() => setRightTab('block')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold transition-colors border-b-2 -mb-px ${
+                rightTab === 'block'
+                  ? 'border-purple-600 text-purple-700 bg-purple-50'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+              data-testid="tab-block"
+            >
+              <Type size={13} />
+              Block
+              {selectedBlockData && (
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
               )}
-            </div>
-          )}
+            </button>
+            <button
+              onClick={() => setRightTab('fields')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold transition-colors border-b-2 -mb-px ${
+                rightTab === 'fields'
+                  ? 'border-purple-600 text-purple-700 bg-purple-50'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+              data-testid="tab-fields"
+            >
+              <Settings size={13} />
+              Fields
+              {fieldDefs.length > 0 && (
+                <span className="ml-0.5 text-xs bg-purple-100 text-purple-700 px-1.5 rounded-full">
+                  {fieldDefs.length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Panel content */}
+          <div className="flex-1 overflow-hidden">
+            {rightTab === 'block' ? (
+              selectedBlockData ? (
+                <BlockConfigPanel
+                  block={selectedBlockData}
+                  fieldDefs={fieldDefs}
+                  onUpdate={updateBlockProp}
+                  onDelete={deleteSelected}
+                  onQuickDefine={handleQuickDefine}
+                  getTokensInText={getTokensInText}
+                  isValidToken={isValidToken}
+                />
+              ) : (
+                <EmptyBlockState
+                  fieldDefs={fieldDefs}
+                  onSwitchToFields={() => setRightTab('fields')}
+                />
+              )
+            ) : (
+              <FieldDefinitionsPanel
+                fieldDefs={fieldDefs}
+                onSave={saveFieldDefs}
+                defaultKey={quickDefineKey}
+                onClearDefaultKey={() => setQuickDefineKey(null)}
+              />
+            )}
+          </div>
         </div>
       </div>
+
+      {/* ── Full Preview Modal ── */}
+      {showPreviewModal && (
+        <PreviewModal
+          dataUrl={previewDataUrl}
+          spreadId={currentSpreadId}
+          onClose={() => { setShowPreviewModal(false); setPreviewDataUrl(null); }}
+          onRefresh={showFullPreview}
+        />
+      )}
     </div>
   );
 }
 
-// ── Block Config Panel Component ─────────────────────────────────────────────
-function BlockConfigPanel({ block, fieldDefs, onUpdate, onDelete, getTokensInText, isValidToken }) {
+// ── Empty Block State ──────────────────────────────────────────────────────────
+function EmptyBlockState({ fieldDefs, onSwitchToFields }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full p-5 text-center text-gray-400">
+      <Type size={28} className="mb-2 text-gray-300" />
+      <p className="text-sm font-medium text-gray-500">No block selected</p>
+      <p className="text-xs mt-1 mb-4">Click a block on the canvas or add one with the toolbar</p>
+
+      {fieldDefs.length > 0 ? (
+        <div className="w-full text-left p-3 bg-purple-50 rounded-lg">
+          <p className="text-xs font-semibold text-purple-700 mb-2">Available tokens:</p>
+          <div className="flex flex-wrap gap-1">
+            {fieldDefs.map(f => (
+              <span key={f.field_key} className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-mono">
+                [{f.field_key}]
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={onSwitchToFields}
+          className="text-xs text-purple-600 hover:underline flex items-center gap-1"
+        >
+          <Plus size={12} />
+          Define personalization fields
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Block Config Panel ─────────────────────────────────────────────────────────
+function BlockConfigPanel({ block, fieldDefs, onUpdate, onDelete, onQuickDefine, getTokensInText, isValidToken }) {
   const tokens = getTokensInText(block.text_template || '');
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-100">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Block Settings</p>
-        <p className="text-xs text-gray-400 mt-0.5 font-mono truncate">{block.block_id}</p>
-      </div>
-
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+
         {/* Text Template */}
         <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">
             Text Template
           </label>
           <textarea
             value={block.text_template || ''}
             onChange={e => onUpdate('text_template', e.target.value)}
             rows={3}
-            placeholder="Enter text or [field_key]"
+            placeholder="Hello [dad_name], meet [son_name]!"
             className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
             data-testid="text-template-input"
           />
-          <p className="text-xs text-gray-400 mt-1">
-            Use [field_key] to insert personalization values
-          </p>
+          <p className="text-xs text-gray-400 mt-1">Use [field_key] for personalization values</p>
         </div>
 
         {/* Token Validation */}
         {tokens.length > 0 && (
           <div>
-            <p className="text-xs font-semibold text-gray-700 mb-1.5">Detected Tokens</p>
-            <div className="flex flex-wrap gap-1">
+            <p className="text-xs font-semibold text-gray-600 mb-1.5">Detected Tokens</p>
+            <div className="space-y-1">
               {tokens.map(tok => (
-                <span
-                  key={tok}
-                  className={`text-xs px-2 py-0.5 rounded-full font-mono ${
-                    isValidToken(tok)
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-red-100 text-red-600'
-                  }`}
-                  title={isValidToken(tok) ? 'Valid field' : 'Field not defined!'}
-                >
-                  [{tok}] {isValidToken(tok) ? '✓' : '⚠'}
-                </span>
+                <div key={tok} className="flex items-center justify-between">
+                  <span className={`text-xs px-2 py-0.5 rounded font-mono ${
+                    isValidToken(tok) ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
+                  }`}>
+                    [{tok}] {isValidToken(tok) ? '✓' : '⚠'}
+                  </span>
+                  {!isValidToken(tok) && (
+                    <button
+                      onClick={() => onQuickDefine(tok)}
+                      className="text-xs text-purple-600 hover:text-purple-800 font-medium flex items-center gap-0.5 ml-2"
+                      data-testid={`define-token-${tok}`}
+                    >
+                      <Plus size={11} />
+                      Define
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
             {tokens.some(t => !isValidToken(t)) && (
-              <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+              <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
                 <Info size={11} />
-                Some tokens are not defined in Field Definitions
+                Undefined tokens won't appear in buyer's form
               </p>
             )}
           </div>
@@ -645,63 +738,55 @@ function BlockConfigPanel({ block, fieldDefs, onUpdate, onDelete, getTokensInTex
 
         {/* Font Family */}
         <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1.5">Font Family</label>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Font Family</label>
           <input
             type="text"
             value={block.font_family || 'Helvetica'}
             onChange={e => onUpdate('font_family', e.target.value)}
-            className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             placeholder="Helvetica"
+            className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500"
             data-testid="font-family-input"
           />
         </div>
 
-        {/* Font Size + Bold/Italic */}
-        <div className="grid grid-cols-2 gap-3">
+        {/* Font Size + Style */}
+        <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1.5">Font Size</label>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Size (pt)</label>
             <input
               type="number"
               value={block.font_size || 24}
               onChange={e => onUpdate('font_size', Number(e.target.value))}
-              min={6}
-              max={200}
-              className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              min={6} max={200}
+              className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500"
               data-testid="font-size-input"
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1.5">Style</label>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Style</label>
             <div className="flex gap-1">
-              <button
-                onClick={() => onUpdate('font_weight', block.font_weight === 'bold' ? 'normal' : 'bold')}
-                className={`flex-1 py-2 rounded-lg border transition-colors ${
-                  block.font_weight === 'bold'
-                    ? 'bg-purple-600 text-white border-purple-600'
-                    : 'bg-white text-gray-700 border-gray-200 hover:border-purple-300'
-                }`}
-                data-testid="bold-toggle"
-              >
-                <Bold size={14} className="mx-auto" />
-              </button>
-              <button
-                onClick={() => onUpdate('italic', !block.italic)}
-                className={`flex-1 py-2 rounded-lg border transition-colors ${
-                  block.italic
-                    ? 'bg-purple-600 text-white border-purple-600'
-                    : 'bg-white text-gray-700 border-gray-200 hover:border-purple-300'
-                }`}
-                data-testid="italic-toggle"
-              >
-                <Italic size={14} className="mx-auto" />
-              </button>
+              {[
+                { prop: 'font_weight', val: block.font_weight === 'bold' ? 'normal' : 'bold', active: block.font_weight === 'bold', Icon: Bold, tid: 'bold-toggle' },
+                { prop: 'italic', val: !block.italic, active: block.italic, Icon: Italic, tid: 'italic-toggle' }
+              ].map(({ prop, val, active, Icon, tid }) => (
+                <button
+                  key={tid}
+                  onClick={() => onUpdate(prop, val)}
+                  className={`flex-1 py-2 rounded-lg border transition-colors ${
+                    active ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'
+                  }`}
+                  data-testid={tid}
+                >
+                  <Icon size={13} className="mx-auto" />
+                </button>
+              ))}
             </div>
           </div>
         </div>
 
         {/* Color */}
         <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1.5">Text Color</label>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Color</label>
           <div className="flex items-center gap-2">
             <input
               type="color"
@@ -714,63 +799,395 @@ function BlockConfigPanel({ block, fieldDefs, onUpdate, onDelete, getTokensInTex
               type="text"
               value={block.color || '#000000'}
               onChange={e => onUpdate('color', e.target.value)}
-              className="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-lg font-mono focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-lg font-mono focus:ring-2 focus:ring-purple-500"
             />
           </div>
         </div>
 
         {/* Alignment */}
         <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1.5">Alignment</label>
+          <label className="block text-xs font-semibold text-gray-600 mb-1.5">Alignment</label>
           <div className="flex gap-1">
             {[
-              { value: 'left', icon: AlignLeft },
-              { value: 'center', icon: AlignCenter },
-              { value: 'right', icon: AlignRight },
-            ].map(({ value, icon: Icon }) => (
+              { v: 'left', Icon: AlignLeft, tid: 'align-left' },
+              { v: 'center', Icon: AlignCenter, tid: 'align-center' },
+              { v: 'right', Icon: AlignRight, tid: 'align-right' },
+            ].map(({ v, Icon, tid }) => (
               <button
-                key={value}
-                onClick={() => onUpdate('alignment', value)}
+                key={v}
+                onClick={() => onUpdate('alignment', v)}
                 className={`flex-1 py-2 rounded-lg border transition-colors ${
-                  block.alignment === value
+                  block.alignment === v
                     ? 'bg-purple-600 text-white border-purple-600'
-                    : 'bg-white text-gray-700 border-gray-200 hover:border-purple-300'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'
                 }`}
-                data-testid={`align-${value}`}
+                data-testid={tid}
               >
-                <Icon size={14} className="mx-auto" />
+                <Icon size={13} className="mx-auto" />
               </button>
             ))}
           </div>
         </div>
 
-        {/* Position (read-only display) */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1.5">Position (px)</label>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-              <span className="text-xs text-gray-400">X: </span>
-              <span className="text-sm font-mono">{block.x || 0}</span>
+        {/* Position read-only */}
+        <div className="grid grid-cols-2 gap-2">
+          {[['X', block.x || 0], ['Y', block.y || 0]].map(([label, val]) => (
+            <div key={label} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">
+              <span className="text-xs text-gray-400">{label}: </span>
+              <span className="text-sm font-mono">{val}</span>
             </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-              <span className="text-xs text-gray-400">Y: </span>
-              <span className="text-sm font-mono">{block.y || 0}</span>
-            </div>
-          </div>
+          ))}
         </div>
-
       </div>
 
-      {/* Delete Block Footer */}
+      {/* Footer */}
       <div className="px-4 py-3 border-t border-gray-100">
         <button
           onClick={onDelete}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100 border border-red-200 transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-red-50 text-red-600 rounded-lg text-sm hover:bg-red-100 border border-red-200 transition-colors"
           data-testid="delete-block-panel-btn"
         >
-          <Trash2 size={14} />
+          <Trash2 size={13} />
           Delete Block
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Field Definitions Panel (in Spread Editor) ────────────────────────────────
+function FieldDefinitionsPanel({ fieldDefs, onSave, defaultKey, onClearDefaultKey }) {
+  const [fields, setFields] = useState(fieldDefs);
+  const [showForm, setShowForm] = useState(!!defaultKey);
+  const [editIdx, setEditIdx] = useState(null);
+  const [form, setForm] = useState(() => emptyForm(defaultKey));
+  const [saving, setSaving] = useState(false);
+
+  function emptyForm(key = '') {
+    return { field_key: key || '', label: '', type: 'text', required: true, placeholder: '', help_text: '', max_length: '', options: '' };
+  }
+
+  // If a quick-define key arrives from parent, open form pre-filled
+  useEffect(() => {
+    if (defaultKey) {
+      setForm(emptyForm(defaultKey));
+      setEditIdx(null);
+      setShowForm(true);
+      onClearDefaultKey();
+    }
+  }, [defaultKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep in sync when parent fieldDefs change (e.g. initial load)
+  useEffect(() => {
+    setFields(fieldDefs);
+  }, [fieldDefs]);
+
+  const openEdit = (idx) => {
+    const f = fields[idx];
+    setForm({ ...f, max_length: f.max_length ? String(f.max_length) : '', options: (f.options || []).join(', ') });
+    setEditIdx(idx);
+    setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.field_key.trim()) { toast.error('Field key required'); return; }
+    if (!form.label.trim()) { toast.error('Label required'); return; }
+    if (/\s/.test(form.field_key)) { toast.error('Field key cannot have spaces'); return; }
+
+    const newField = {
+      field_key: form.field_key.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+      label: form.label,
+      type: form.type,
+      required: form.required,
+      placeholder: form.placeholder,
+      help_text: form.help_text,
+      max_length: form.max_length ? parseInt(form.max_length) : null,
+      options: form.type === 'select' ? form.options.split(',').map(o => o.trim()).filter(Boolean) : [],
+      validation_regex: null,
+    };
+
+    let updated;
+    if (editIdx !== null) {
+      updated = fields.map((f, i) => i === editIdx ? newField : f);
+    } else {
+      if (fields.some(f => f.field_key === newField.field_key)) {
+        toast.error(`Key "${newField.field_key}" already exists`);
+        return;
+      }
+      updated = [...fields, newField];
+    }
+
+    setSaving(true);
+    try {
+      await onSave(updated);
+      setFields(updated);
+      setShowForm(false);
+      setEditIdx(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteField = async (idx) => {
+    const updated = fields.filter((_, i) => i !== idx);
+    await onSave(updated);
+    setFields(updated);
+  };
+
+  const moveField = (idx, dir) => {
+    const arr = [...fields];
+    const t = idx + dir;
+    if (t < 0 || t >= arr.length) return;
+    [arr[idx], arr[t]] = [arr[t], arr[idx]];
+    setFields(arr);
+    onSave(arr);
+  };
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex-1 overflow-y-auto">
+        {/* Info banner */}
+        <div className="mx-3 mt-3 p-2.5 bg-purple-50 border border-purple-100 rounded-lg text-xs text-purple-800">
+          Fields defined here appear in the buyer's personalization form.
+          Use <span className="font-mono bg-purple-100 px-1 rounded">[field_key]</span> in text blocks above.
+        </div>
+
+        {/* Field list */}
+        <div className="px-3 pt-3 space-y-1.5">
+          {fields.map((field, idx) => (
+            <div
+              key={field.field_key}
+              className="flex items-start gap-1.5 p-2.5 bg-gray-50 border border-gray-200 rounded-lg"
+              data-testid={`field-${field.field_key}`}
+            >
+              {/* Reorder */}
+              <div className="flex flex-col mt-0.5">
+                <button onClick={() => moveField(idx, -1)} disabled={idx === 0} className="text-gray-300 hover:text-gray-500 disabled:opacity-20 p-0.5">
+                  <ChevronUp size={12} />
+                </button>
+                <button onClick={() => moveField(idx, fields.length - 1)} disabled={idx === fields.length - 1} className="text-gray-300 hover:text-gray-500 disabled:opacity-20 p-0.5">
+                  <ChevronDown size={12} />
+                </button>
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="font-mono text-xs font-bold text-gray-800">[{field.field_key}]</span>
+                  <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">{field.type}</span>
+                  {field.required && <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-600 rounded">req</span>}
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5 truncate">{field.label}</p>
+                {field.placeholder && (
+                  <p className="text-xs text-gray-400 truncate">"{field.placeholder}"</p>
+                )}
+              </div>
+
+              <div className="flex gap-0.5 flex-shrink-0">
+                <button onClick={() => openEdit(idx)} className="p-1 text-gray-400 hover:text-purple-600 rounded">
+                  <Settings size={12} />
+                </button>
+                <button onClick={() => deleteField(idx)} className="p-1 text-gray-400 hover:text-red-500 rounded">
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {fields.length === 0 && !showForm && (
+            <div className="text-center py-6 text-gray-400">
+              <Layers size={24} className="mx-auto mb-2 text-gray-300" />
+              <p className="text-xs">No fields defined yet</p>
+            </div>
+          )}
+        </div>
+
+        {/* Inline Add / Edit Form */}
+        {showForm && (
+          <div className="mx-3 mt-3 p-3 border-2 border-purple-200 rounded-lg bg-purple-50 space-y-2.5">
+            <p className="text-xs font-bold text-gray-700">
+              {editIdx !== null ? 'Edit Field' : 'New Field'}
+            </p>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-gray-600 font-medium">Key *</label>
+                <input
+                  value={form.field_key}
+                  onChange={e => setForm(p => ({ ...p, field_key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') }))}
+                  placeholder="dad_name"
+                  disabled={editIdx !== null}
+                  className="w-full mt-0.5 px-2 py-1.5 text-xs border border-gray-300 rounded font-mono focus:ring-1 focus:ring-purple-500 disabled:bg-gray-100"
+                  data-testid="field-key-input"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 font-medium">Label *</label>
+                <input
+                  value={form.label}
+                  onChange={e => setForm(p => ({ ...p, label: e.target.value }))}
+                  placeholder="Father's Name"
+                  className="w-full mt-0.5 px-2 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-purple-500"
+                  data-testid="field-label-input"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-gray-600 font-medium">Type</label>
+                <select
+                  value={form.type}
+                  onChange={e => setForm(p => ({ ...p, type: e.target.value }))}
+                  className="w-full mt-0.5 px-2 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-purple-500"
+                  data-testid="field-type-select"
+                >
+                  {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div className="flex items-end pb-1">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.required}
+                    onChange={e => setForm(p => ({ ...p, required: e.target.checked }))}
+                    className="w-3.5 h-3.5 text-purple-600 rounded"
+                  />
+                  <span className="text-xs text-gray-600 font-medium">Required</span>
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-600 font-medium">Placeholder</label>
+              <input
+                value={form.placeholder}
+                onChange={e => setForm(p => ({ ...p, placeholder: e.target.value }))}
+                placeholder="e.g. Enter dad's name..."
+                className="w-full mt-0.5 px-2 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-purple-500"
+              />
+            </div>
+
+            {form.type === 'select' && (
+              <div>
+                <label className="text-xs text-gray-600 font-medium">Options (comma-sep)</label>
+                <input
+                  value={form.options}
+                  onChange={e => setForm(p => ({ ...p, options: e.target.value }))}
+                  placeholder="Option 1, Option 2"
+                  className="w-full mt-0.5 px-2 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-purple-500"
+                />
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-purple-600 text-white text-xs rounded hover:bg-purple-700 transition-colors disabled:opacity-50"
+                data-testid="save-field-btn"
+              >
+                {saving ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                {editIdx !== null ? 'Update' : 'Add Field'}
+              </button>
+              <button
+                onClick={() => { setShowForm(false); setEditIdx(null); }}
+                className="px-3 py-1.5 text-gray-600 text-xs rounded hover:bg-gray-100 border border-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Footer: Add button */}
+      {!showForm && (
+        <div className="px-3 py-3 border-t border-gray-100">
+          <button
+            onClick={() => { setForm(emptyForm()); setEditIdx(null); setShowForm(true); }}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 border-2 border-dashed border-purple-300 text-purple-600 rounded-lg hover:bg-purple-50 text-xs font-medium transition-colors"
+            data-testid="add-field-btn"
+          >
+            <Plus size={13} />
+            Add New Field
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Full Preview Modal ────────────────────────────────────────────────────────
+function PreviewModal({ dataUrl, spreadId, onClose, onRefresh }) {
+  const handleDownload = () => {
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `spread-${spreadId + 1}-preview.jpg`;
+    a.click();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-white rounded-xl shadow-2xl overflow-hidden max-w-5xl w-full max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50">
+          <div>
+            <h3 className="font-semibold text-gray-900">Page {spreadId + 1} — Live Preview</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Showing how text blocks will appear to your customer (with sample values)
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onRefresh}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200 transition-colors"
+              title="Refresh preview"
+            >
+              <RefreshCw size={14} />
+              Refresh
+            </button>
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100 border border-blue-200 transition-colors"
+            >
+              <Download size={14} />
+              Download
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Preview image */}
+        <div className="flex-1 overflow-auto flex items-center justify-center p-6 bg-gray-100">
+          {dataUrl ? (
+            <img
+              src={dataUrl}
+              alt={`Page ${spreadId + 1} preview`}
+              className="max-w-full max-h-full rounded-lg shadow-xl"
+              style={{ imageRendering: 'auto' }}
+            />
+          ) : (
+            <div className="text-center text-gray-400">
+              <Loader2 size={32} className="animate-spin mx-auto mb-2" />
+              <p className="text-sm">Generating preview...</p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer note */}
+        <div className="px-5 py-2.5 border-t border-gray-200 bg-gray-50">
+          <p className="text-xs text-gray-500">
+            Sample values from field placeholders are shown. Actual customer values will be used when generating the storybook.
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -10,9 +10,10 @@ function TemplateManagement({ standalone = true }) {
   const navigate = useNavigate();
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [showFieldMapper, setShowFieldMapper] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [pendingFile, setPendingFile] = useState(null);
 
   useEffect(() => {
     fetchTemplates();
@@ -31,51 +32,47 @@ function TemplateManagement({ standalone = true }) {
     }
   };
 
-  const handleUpload = async (e) => {
+  // Step 1: file selected → open modal for title/slug
+  const handleFileSelect = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    if (!file.name.endsWith('.pdf')) {
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
       toast.error('Please upload a PDF file');
       return;
     }
+    setPendingFile(file);
+    setShowUploadModal(true);
+    // Reset file input so same file can be re-selected
+    e.target.value = '';
+  };
 
-    const title = prompt('Enter template title:');
-    if (!title) return;
-
-    const productSlug = prompt('Enter product slug (e.g., "lunas-adventure"):');
-    if (!productSlug) return;
-
-    setUploading(true);
-
+  // Step 2: modal submits → do actual upload
+  const handleUploadSubmit = async ({ title, productSlug, description }) => {
+    if (!pendingFile) return;
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', pendingFile);
     formData.append('title', title);
     formData.append('productSlug', productSlug);
-    formData.append('description', '');
+    formData.append('description', description || '');
 
-    try {
-      const response = await fetch(`${API_URL}/api/templates/upload`, {
-        method: 'POST',
-        body: formData
-      });
+    const response = await fetch(`${API_URL}/api/templates/upload`, {
+      method: 'POST',
+      body: formData
+    });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Upload failed');
-      }
-
-      const template = await response.json();
-      toast.success('Template uploaded successfully!');
-      fetchTemplates();
-      setSelectedTemplate(template);
-      setShowFieldMapper(true);
-    } catch (error) {
-      console.error('Upload failed:', error);
-      toast.error(error.message || 'Failed to upload template');
-    } finally {
-      setUploading(false);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Upload failed');
     }
+
+    const template = await response.json();
+    setPendingFile(null);
+    setShowUploadModal(false);
+    toast.success('Template uploaded successfully!');
+    fetchTemplates();
+    setSelectedTemplate(template);
+    setShowFieldMapper(true);
+    return template;
   };
 
   const updateTemplateStatus = async (templateId, newStatus) => {
@@ -147,14 +144,8 @@ function TemplateManagement({ standalone = true }) {
             </div>
             <label className="cursor-pointer px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2">
               <Upload size={20} />
-              {uploading ? 'Uploading...' : 'Upload Template'}
-              <input
-                type="file"
-                accept=".pdf"
-                onChange={handleUpload}
-                className="hidden"
-                disabled={uploading}
-              />
+              Upload Template
+              <input type="file" accept=".pdf" onChange={handleFileSelect} className="hidden" />
             </label>
           </div>
         </div>
@@ -167,14 +158,8 @@ function TemplateManagement({ standalone = true }) {
             <h1 className="text-2xl font-bold text-gray-900">Template Management</h1>
             <label className="cursor-pointer px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2">
               <Upload size={20} />
-              {uploading ? 'Uploading...' : 'Upload Template'}
-              <input
-                type="file"
-                accept=".pdf"
-                onChange={handleUpload}
-                className="hidden"
-                disabled={uploading}
-              />
+              Upload Template
+              <input type="file" accept=".pdf" onChange={handleFileSelect} className="hidden" />
             </label>
           </div>
         </div>
@@ -211,6 +196,15 @@ function TemplateManagement({ standalone = true }) {
           </div>
         )}
       </div>
+
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <UploadModal
+          fileName={pendingFile?.name}
+          onSubmit={handleUploadSubmit}
+          onClose={() => { setShowUploadModal(false); setPendingFile(null); }}
+        />
+      )}
 
       {/* Field Mapper Modal */}
       {showFieldMapper && selectedTemplate && (
@@ -838,6 +832,130 @@ function FieldMapperModal({ template, onClose }) {
             className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
           >
             {saving ? 'Saving...' : 'Save Settings'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Upload Modal ──────────────────────────────────────────────────────────────
+function UploadModal({ fileName, onSubmit, onClose }) {
+  const [form, setForm] = useState({ title: '', productSlug: '', description: '' });
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+
+  const slugify = (val) =>
+    val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  const handleTitleChange = (val) => {
+    setForm(p => ({
+      ...p,
+      title: val,
+      productSlug: p.productSlug || slugify(val)
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.title.trim()) { setError('Title is required'); return; }
+    if (!form.productSlug.trim()) { setError('Product slug is required'); return; }
+    setError('');
+    setUploading(true);
+    try {
+      await onSubmit(form);
+    } catch (err) {
+      setError(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="text-xl font-bold text-gray-900">Upload Template PDF</h2>
+          <p className="text-sm text-gray-500 mt-1 truncate">{fileName}</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+            Works with <strong>any PDF</strong> — with or without fillable fields.
+            Use Spread Block Editor to add visual text overlays.
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Template Title <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={e => handleTitleChange(e.target.value)}
+              placeholder="e.g. Baby Boy Adventure"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              autoFocus
+              data-testid="upload-title-input"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Product Slug <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.productSlug}
+              onChange={e => setForm(p => ({ ...p, productSlug: slugify(e.target.value) }))}
+              placeholder="e.g. baby-boy-adventure"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-sm"
+              data-testid="upload-slug-input"
+            />
+            <p className="text-xs text-gray-400 mt-1">Matches your Polar product slug</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <input
+              type="text"
+              value={form.description}
+              onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+              placeholder="Optional description"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            />
+          </div>
+
+          {error && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>
+          )}
+        </form>
+
+        <div className="px-6 py-4 border-t border-gray-200 flex gap-3 justify-end">
+          <button
+            onClick={onClose}
+            disabled={uploading}
+            className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={uploading}
+            className="px-5 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+            data-testid="upload-submit-btn"
+          >
+            {uploading ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Uploading...
+              </>
+            ) : (
+              <>
+                <Upload size={16} />
+                Upload Template
+              </>
+            )}
           </button>
         </div>
       </div>

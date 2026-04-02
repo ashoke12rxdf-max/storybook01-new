@@ -412,16 +412,11 @@ async def upload_template(
         
         logger.info(f"Saved template PDF: {pdf_path}")
         
-        # Detect fillable fields
+        # Detect fillable fields (optional - PDFs without fillable fields are allowed
+        # so admins can use Spread Block Editor for visual text overlays)
         fillable_fields = await TemplateManager.detect_fillable_fields(str(pdf_path))
-        
         if not fillable_fields:
-            # Clean up
-            pdf_path.unlink()
-            raise HTTPException(
-                status_code=400,
-                detail="No fillable fields detected in PDF. Please upload a fillable PDF template."
-            )
+            logger.info(f"No fillable fields detected in PDF {template_id} - proceeding (spread blocks will be used)")
         
         # Get PDF info
         pdf_info = await TemplateManager.get_pdf_info(str(pdf_path))
