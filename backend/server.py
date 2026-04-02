@@ -2304,6 +2304,65 @@ async def check_review_submitted(storybook_id: str, session_id: str):
         return {"submitted": False}
 
 
+@api_router.post("/admin/templates/{template_id}/preview-pdf")
+async def preview_template_pdf(template_id: str, request: Request):
+    """
+    Admin endpoint: generate a test PDF for a template using provided field values.
+    Applies spread_blocks with placeholder resolution and returns the PDF as a download.
+    Body: { "field_values": { "dad_name": "John", "son_name": "Jake", ... } }
+    """
+    try:
+        body = await request.json()
+        field_values: dict = body.get("field_values", {})
+
+        template = await db.templates.find_one({"id": template_id}, {"_id": 0})
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+
+        spread_blocks = template.get("spread_blocks", [])
+        base_pdf = template.get("basePdfPath", "")
+        orientation = template.get("orientation", "landscape")
+
+        if not base_pdf or not Path(base_pdf).exists():
+            raise HTTPException(status_code=400, detail="Template PDF not found on disk")
+
+        # Build preview output path
+        preview_id = str(uuid.uuid4())
+        output_path = PERSONALIZED_DIR / f"preview_{preview_id}.pdf"
+
+        if spread_blocks:
+            # Use the already-instantiated global processor
+            await personalization_processor._overlay_spread_blocks(
+                base_pdf, spread_blocks, field_values, str(output_path), orientation
+            )
+        else:
+            # No blocks — just copy the template
+            import shutil as _shutil
+            _shutil.copy2(base_pdf, str(output_path))
+
+        if not output_path.exists():
+            raise HTTPException(status_code=500, detail="PDF generation failed")
+
+        def cleanup():
+            try:
+                output_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        return FileResponse(
+            str(output_path),
+            media_type="application/pdf",
+            filename=f"preview_{template.get('title', template_id)}.pdf",
+            background=BackgroundTasks(),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Preview PDF error: {e}")
+        raise HTTPException(status_code=500, detail=f"Preview generation failed: {str(e)}")
+
+
 @api_router.get("/template-spreads/{template_id}/{filename}")
 async def get_template_spread_image(template_id: str, filename: str):
     """Serve cached template spread images generated from the template PDF"""

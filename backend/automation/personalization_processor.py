@@ -280,11 +280,19 @@ class PersonalizationProcessor:
                 bx = float(block.get("x", 0)) * sx
                 by = float(block.get("y", 0)) * sy
                 bw = max(float(block.get("width", 200)) * sx, 20.0)
-                bh = max(float(block.get("height", 50)) * sy, 15.0)
-                rect = fitz.Rect(bx, by, bx + bw, by + bh)
+                bh_raw = max(float(block.get("height", 50)) * sy, 15.0)
 
                 # Font size in PDF points
                 font_size_pdf = max(6.0, float(block.get("font_size", 24)) * sx)
+
+                # Line height
+                line_height = float(block.get("line_height", 1.2))
+                line_height = max(0.5, min(line_height, 4.0))
+
+                # Ensure rect height fits at least one line (generous padding so short blocks don't clip)
+                min_single_line_h = font_size_pdf * line_height * 1.5
+                bh = max(bh_raw, min_single_line_h)
+                rect = fitz.Rect(bx, by, bx + bw, by + bh)
 
                 # Color
                 color = self._hex_to_rgb(block.get("color", "#000000"))
@@ -296,10 +304,6 @@ class PersonalizationProcessor:
                     "right": fitz.TEXT_ALIGN_RIGHT,
                 }
                 align = align_map.get(block.get("alignment", "left"), fitz.TEXT_ALIGN_LEFT)
-
-                # Line height
-                line_height = float(block.get("line_height", 1.2))
-                line_height = max(0.5, min(line_height, 4.0))
 
                 # Resolve font file
                 font_file = None
