@@ -1,209 +1,157 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Loader2, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { Loader2, CheckCircle, Mail, AlertCircle, BookOpen } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+const POLL_INTERVAL_MS = 2000;
+const MAX_POLLS = 30;           // 60 seconds total
+const LATE_THRESHOLD = 15;      // After 30s show "almost there" messaging
 
-function PersonalizationSuccess() {
+export default function PersonalizationSuccess() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  
-  const [status, setStatus] = useState('loading');
-  const [message, setMessage] = useState('Preparing your personalization form...');
-  const [pollCount, setPollCount] = useState(0);
-  const [viewUrl, setViewUrl] = useState(null);
-  
   const checkoutId = searchParams.get('checkout_id');
-  
-  const maxPolls = 15; // 30 seconds (2s intervals)
-  
+
+  const [pollCount, setPollCount] = useState(0);
+  const [status, setStatus] = useState('polling'); // polling | redirecting | check_email | error
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const poll = useCallback(async () => {
+    if (!checkoutId) return false;
+    try {
+      const res = await fetch(
+        `${API_URL}/api/personalization/by-checkout?checkout_id=${encodeURIComponent(checkoutId)}`
+      );
+      if (!res.ok) return false;
+      const data = await res.json();
+
+      if (data.status === 'ready') {
+        setStatus('redirecting');
+        const dest = data.redirect_url || `/personalize/${data.session_token}`;
+        setTimeout(() => navigate(dest), 400);
+        return true;
+      }
+      if (data.status === 'submitted' || data.status === 'completed') {
+        const url = data.customer_view_url;
+        if (url) {
+          setStatus('redirecting');
+          setTimeout(() => { window.location.href = url; }, 400);
+        } else {
+          setStatus('check_email');
+        }
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, [checkoutId, navigate]);
+
   useEffect(() => {
     if (!checkoutId) {
       setStatus('error');
-      setMessage('Missing checkout ID. Please check your email for the personalization link.');
+      setErrorMessage('No checkout ID found. Please check your confirmation email.');
       return;
     }
-    
-    let intervalId = null;
-    let localPollCount = 0;
-    let isRedirecting = false;
-    
-    const checkSession = async () => {
-      if (isRedirecting) return true;
-      
-      try {
-        const response = await fetch(
-          `${API_URL}/api/personalization/by-checkout?checkout_id=${checkoutId}`
-        );
-        const data = await response.json();
-        
-        if (data.status === 'ready') {
-          // Session is ready - redirect to form
-          isRedirecting = true;
-          setStatus('success');
-          setMessage('Redirecting to your personalization form...');
-          setTimeout(() => {
-            navigate(data.redirect_url);
-          }, 1000);
-          return true;
-          
-        } else if (data.status === 'submitted' || data.status === 'completed') {
-          // Already submitted
-          setStatus('completed');
-          setMessage('Your storybook has already been personalized!');
-          setViewUrl(data.customer_view_url);
-          return true;
-          
-        } else if (data.status === 'not_found') {
-          // Keep polling
-          localPollCount++;
-          setPollCount(localPollCount);
-          
-          if (localPollCount >= maxPolls) {
-            setStatus('timeout');
-            setMessage('Taking longer than expected. Please check your email for the personalization link.');
-            return true;
-          }
-          return false;
-          
-        } else {
-          // Still processing
-          localPollCount++;
-          setPollCount(localPollCount);
-          return false;
-        }
-      } catch (error) {
-        console.error('Error checking session:', error);
-        localPollCount++;
-        setPollCount(localPollCount);
-        
-        if (localPollCount >= maxPolls) {
-          setStatus('timeout');
-          setMessage('Taking longer than expected. Please check your email for the personalization link.');
-          return true;
-        }
-        return false;
+
+    let count = 0;
+    let timer = null;
+    let stopped = false;
+
+    const runPoll = async () => {
+      if (stopped) return;
+      count++;
+      setPollCount(count);
+      const done = await poll();
+      if (done || stopped) return;
+      if (count >= MAX_POLLS) {
+        setStatus('check_email');
+        return;
       }
+      timer = setTimeout(runPoll, POLL_INTERVAL_MS);
     };
-    
-    // Initial check
-    checkSession().then(done => {
-      if (!done) {
-        // Start polling
-        intervalId = setInterval(async () => {
-          const isDone = await checkSession();
-          if (isDone && intervalId) {
-            clearInterval(intervalId);
-            intervalId = null;
-          }
-        }, 2000);
-      }
-    });
-    
-    // Cleanup on unmount
+
+    runPoll();
     return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
+      stopped = true;
+      clearTimeout(timer);
     };
-  }, [checkoutId, navigate]);
-  
+  }, [checkoutId, poll]);
+
+  const progress = Math.min((pollCount / MAX_POLLS) * 100, 100);
+  const isLate = pollCount > LATE_THRESHOLD;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-8 text-center">
-        {/* Logo/Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-purple-600">Storybook Vault</h1>
-          <p className="text-gray-500 mt-1">Personalized Stories</p>
+      <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center space-y-6">
+
+        {/* Logo */}
+        <div className="w-16 h-16 bg-purple-600 rounded-2xl flex items-center justify-center mx-auto">
+          <BookOpen className="w-8 h-8 text-white" />
         </div>
-        
-        {/* Status Icon */}
-        <div className="mb-6">
-          {status === 'loading' && (
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-purple-100 rounded-full">
-              <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
+
+        {/* ── Polling ── */}
+        {status === 'polling' && (
+          <>
+            <Loader2 className="w-10 h-10 text-purple-500 animate-spin mx-auto" />
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">
+                {isLate ? 'Almost there…' : 'Payment confirmed!'}
+              </h1>
+              <p className="text-gray-500 text-sm">
+                {isLate
+                  ? 'Still setting up your session — this usually takes under a minute.'
+                  : 'Setting up your personalization form, hang tight…'}
+              </p>
             </div>
-          )}
-          {status === 'success' && (
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full">
-              <CheckCircle className="w-8 h-8 text-green-600" />
-            </div>
-          )}
-          {status === 'completed' && (
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full">
-              <CheckCircle className="w-8 h-8 text-blue-600" />
-            </div>
-          )}
-          {(status === 'error' || status === 'timeout') && (
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-amber-100 rounded-full">
-              {status === 'timeout' ? (
-                <Clock className="w-8 h-8 text-amber-600" />
-              ) : (
-                <AlertCircle className="w-8 h-8 text-amber-600" />
-              )}
-            </div>
-          )}
-        </div>
-        
-        {/* Status Message */}
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">
-          {status === 'loading' && 'Payment Successful!'}
-          {status === 'success' && 'Ready!'}
-          {status === 'completed' && 'Already Personalized'}
-          {status === 'timeout' && 'Still Processing'}
-          {status === 'error' && 'Something Went Wrong'}
-        </h2>
-        
-        <p className="text-gray-600 mb-6">{message}</p>
-        
-        {/* Progress indicator for polling */}
-        {status === 'loading' && (
-          <div className="mb-6">
-            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-purple-600 transition-all duration-500"
-                style={{ width: `${Math.min((pollCount / maxPolls) * 100, 100)}%` }}
+            {/* Progress bar */}
+            <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="bg-purple-500 h-1.5 rounded-full transition-all duration-500"
+                style={{ width: `${progress}%` }}
               />
             </div>
-            <p className="text-xs text-gray-400 mt-2">
-              Please wait while we prepare your form...
-            </p>
-          </div>
+          </>
         )}
-        
-        {/* View button for completed storybooks */}
-        {status === 'completed' && viewUrl && (
-          <a
-            href={viewUrl}
-            className="inline-flex items-center justify-center px-6 py-3 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors"
-          >
-            View Your Storybook
-          </a>
+
+        {/* ── Redirecting ── */}
+        {status === 'redirecting' && (
+          <>
+            <CheckCircle className="w-10 h-10 text-green-500 mx-auto" />
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">Ready!</h1>
+              <p className="text-gray-500 text-sm">Redirecting to your form…</p>
+            </div>
+          </>
         )}
-        
-        {/* Help text for timeout/error */}
-        {(status === 'timeout' || status === 'error') && (
-          <div className="bg-gray-50 rounded-lg p-4 text-left">
-            <p className="text-sm text-gray-600">
-              <strong>What to do:</strong>
-            </p>
-            <ul className="text-sm text-gray-500 mt-2 space-y-1">
-              <li>• Check your email for the personalization link</li>
-              <li>• The link might take a few minutes to arrive</li>
-              <li>• Contact support if you don't receive it within 10 minutes</li>
-            </ul>
-          </div>
+
+        {/* ── Check Email ── */}
+        {status === 'check_email' && (
+          <>
+            <Mail className="w-10 h-10 text-purple-500 mx-auto" />
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">Check your email!</h1>
+              <p className="text-gray-500 text-sm mb-2">
+                We've emailed you a personalization link. Click it to fill in the details for your storybook.
+              </p>
+              <p className="text-xs text-gray-400">
+                Didn't get it? Check your spam folder, or contact support.
+              </p>
+            </div>
+          </>
         )}
-        
-        {/* Footer */}
-        <div className="mt-8 pt-6 border-t border-gray-100">
-          <p className="text-xs text-gray-400">
-            Thank you for your purchase! Your personalized storybook is almost ready.
-          </p>
-        </div>
+
+        {/* ── Error ── */}
+        {status === 'error' && (
+          <>
+            <AlertCircle className="w-10 h-10 text-red-500 mx-auto" />
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">Something went wrong</h1>
+              <p className="text-gray-500 text-sm">{errorMessage}</p>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 }
-
-export default PersonalizationSuccess;

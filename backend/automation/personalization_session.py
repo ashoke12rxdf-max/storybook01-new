@@ -111,11 +111,35 @@ class PersonalizationSessionManager:
         }
     
     async def get_session_by_checkout(self, checkout_id: str) -> Optional[Dict]:
-        """Find session by Polar checkout ID"""
-        return await self.db.personalization_sessions.find_one(
+        """
+        Find session by Polar checkout ID.
+        Falls back to order_id / external_order_id lookups for backward compat.
+        """
+        # Primary: look up by the stored checkout_id
+        session = await self.db.personalization_sessions.find_one(
             {"checkout_id": checkout_id},
             {"_id": 0}
         )
+        if session:
+            return session
+        
+        # Fallback 1: some older sessions may have stored order_id where checkout_id is stored
+        session = await self.db.personalization_sessions.find_one(
+            {"order_id": checkout_id},
+            {"_id": 0}
+        )
+        if session:
+            logger.info(f"[CHECKOUT LOOKUP] Found session via order_id fallback for checkout_id={checkout_id}")
+            return session
+        
+        # Fallback 2: external_order_id
+        session = await self.db.personalization_sessions.find_one(
+            {"external_order_id": checkout_id},
+            {"_id": 0}
+        )
+        if session:
+            logger.info(f"[CHECKOUT LOOKUP] Found session via external_order_id fallback for checkout_id={checkout_id}")
+        return session
     
     async def get_session_by_token(self, token: str) -> Optional[Dict]:
         """Find session by session token"""

@@ -80,7 +80,16 @@ class WebhookHandler:
         """Handle webhook by creating a personalization session"""
         
         external_order_id = webhook_data.get("orderId") or webhook_data.get("externalOrderId")
-        checkout_id = webhook_data.get("checkoutId") or external_order_id  # Use order_id as fallback
+        # Use the real Polar checkout_id (from data.checkout_id).
+        # Fall back to order_id only if checkout_id is missing (e.g. older events).
+        checkout_id = webhook_data.get("checkoutId") or external_order_id
+        customer_email = webhook_data.get("customerEmail", "")
+        product_slug = webhook_data.get("productSlug", "")
+        
+        logger.info(
+            f"[PERSONALIZATION FLOW] orderId={external_order_id}, checkoutId={checkout_id}, "
+            f"email={customer_email}, productSlug={product_slug}, simulated={is_simulated}"
+        )
         
         # Check for existing session (idempotency)
         existing_session = await self.db.personalization_sessions.find_one({
@@ -113,7 +122,11 @@ class WebhookHandler:
         
         session = result["session"]
         
-        logger.info(f"Created personalization session {session['session_token']} for order {external_order_id}")
+        logger.info(
+            f"[SESSION CREATED] token={session['session_token']}, "
+            f"checkout_id={checkout_id}, order_id={external_order_id}, "
+            f"email={customer_email}"
+        )
         
         return {
             "received": True,
@@ -197,8 +210,7 @@ class WebhookHandler:
         }
         
         # Validate required fields
-        if not customer_data["requestedName"]:
-            raise ValueError("requestedName is required")
+        # requestedName is optional for personalization templates (name comes from form)
         if not customer_data["customerEmail"]:
             raise ValueError("customerEmail is required")
         
@@ -333,17 +345,10 @@ class WebhookHandler:
             "type": "order.paid",
             "data": {
                 "id": "order_id",
-                "metadata": {
-                    "product_slug": "..."
-                },
-                "custom_field_data": {
-                    "requested_name": "...",
-                    "password": "..."
-                },
-                "customer": {
-                    "email": "...",
-                    "name": "..."
-                },
+                "checkout_id": "chk_xxx",   ← this is in the redirect URL ?checkout_id=
+                "metadata": {"product_slug": "..."},
+                "custom_field_data": {"requested_name": "...", "password": "..."},
+                "customer": {"email": "...", "name": "..."},
                 ...
             }
         }
@@ -351,8 +356,16 @@ class WebhookHandler:
         event_type = webhook_data.get("type", "")
         data = webhook_data.get("data", {})
         
-        # Extract order ID
+        # Extract order ID (Polar internal order ID)
         order_id = data.get("id") or webhook_data.get("id")
+        
+        # Extract checkout ID — THIS is what appears in ?checkout_id= on the redirect URL
+        checkout_id = (
+            data.get("checkout_id") or
+            data.get("checkoutId") or
+            webhook_data.get("checkout_id") or
+            webhook_data.get("checkoutId")
+        )
         
         # Extract product slug from metadata
         metadata = data.get("metadata", {})
@@ -366,7 +379,7 @@ class WebhookHandler:
             custom_fields.get("Requested Name") or
             custom_fields.get("child_name") or
             custom_fields.get("name")
-        )
+        ) or ""
         password = (
             custom_fields.get("password") or 
             custom_fields.get("Password")
@@ -386,10 +399,16 @@ class WebhookHandler:
             "paymentProvider": "polar"
         }
         
+        logger.info(
+            f"[POLAR PARSE] eventType={event_type}, orderId={order_id}, "
+            f"checkoutId={checkout_id}, email={customer_email}, productSlug={product_slug}"
+        )
+        
         return {
             "eventType": event_type,
             "orderId": order_id,
             "externalOrderId": order_id,
+            "checkoutId": checkout_id,          # Real Polar checkout ID for session lookup
             "eventId": webhook_data.get("event_id") or order_id,
             "productSlug": product_slug,
             "requestedName": requested_name,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BookOpen, FileText, Package, LogOut, Settings as SettingsIcon, Star } from 'lucide-react';
+import { BookOpen, FileText, Package, LogOut, Settings as SettingsIcon, Star, Users } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import Dashboard from '@/pages/Dashboard';
@@ -7,6 +7,7 @@ import TemplateManagement from '@/pages/TemplateManagement';
 import AutomationOrders from '@/pages/AutomationOrders';
 import Settings from '@/pages/Settings';
 import AdminReviews from '@/pages/AdminReviews';
+import PersonalizationOrders from '@/pages/PersonalizationOrders';
 
 function AdminPanel() {
   const [activeSection, setActiveSection] = useState('dashboard');
@@ -22,6 +23,7 @@ function AdminPanel() {
     { id: 'dashboard', name: 'Dashboard', icon: BookOpen },
     { id: 'templates', name: 'Templates', icon: FileText },
     { id: 'orders', name: 'Orders', icon: Package },
+    { id: 'personalization', name: 'Personalization', icon: Users },
     { id: 'reviews', name: 'Reviews', icon: Star },
     { id: 'settings', name: 'Settings', icon: SettingsIcon }
   ];
@@ -82,6 +84,7 @@ function AdminPanel() {
         {activeSection === 'dashboard' && <DashboardContent />}
         {activeSection === 'templates' && <TemplateManagement standalone={false} />}
         {activeSection === 'orders' && <AutomationOrders standalone={false} />}
+        {activeSection === 'personalization' && <PersonalizationOrders />}
         {activeSection === 'reviews' && <AdminReviews />}
         {activeSection === 'settings' && <Settings />}
       </div>

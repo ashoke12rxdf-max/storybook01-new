@@ -1013,22 +1013,27 @@ async def process_polar_order_background(order_id: str):
 async def send_personalization_email(session_token: str):
     """Background task to send personalization link email to customer"""
     try:
-        from automation.email_sender import EmailSender
-        
         session = await session_manager.get_session_by_token(session_token)
         if not session:
-            logger.error(f"Session not found for email: {session_token}")
+            logger.error(f"[EMAIL] Session not found for token: {session_token}")
             return
         
         customer_email = session.get("customer_email")
-        customer_name = session.get("customer_name", "Friend")
+        if not customer_email:
+            logger.error(f"[EMAIL] No customer email in session {session_token}")
+            return
+        
+        customer_name = session.get("customer_name") or "Friend"
         product_title = session.get("template_snapshot", {}).get("title", "Your Storybook")
         
         # Build personalization URL
-        base_url = os.getenv("APP_BASE_URL", "http://localhost:3000").rstrip('/')
+        base_url = os.getenv("APP_BASE_URL", "").strip().strip('"').rstrip('/')
+        if not base_url:
+            base_url = "http://localhost:3000"
         personalization_url = f"{base_url}/personalize/{session_token}"
         
-        # Send email with personalization link
+        logger.info(f"[EMAIL] Sending to {customer_email} | url={personalization_url}")
+        
         html_content = f"""
         <html>
         <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -1045,54 +1050,64 @@ async def send_personalization_email(session_token: str):
                     Personalize Your Storybook
                 </a>
             </div>
-            <p style="color: #666; font-size: 14px;">
-                Or copy this link: {personalization_url}
-            </p>
+            <p style="color: #666; font-size: 14px;">Or copy this link: {personalization_url}</p>
             <p style="color: #666; font-size: 14px; margin-top: 30px;">
                 Note: You can only submit the form once, so please make sure all details are correct before submitting.
             </p>
             <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-            <p style="color: #999; font-size: 12px; text-align: center;">
-                Made with love by Storybook Vault
-            </p>
+            <p style="color: #999; font-size: 12px; text-align: center;">Made with love by Storybook Vault</p>
         </body>
         </html>
         """
         
-        text_content = f"""
-Hi {customer_name}!
+        text_content = f"""Hi {customer_name}!
 
 Thank you for your purchase! Your personalized storybook "{product_title}" is almost ready.
 
-To complete your storybook, please fill in the personalization details at:
+To complete your storybook, please visit:
 {personalization_url}
 
-Note: You can only submit the form once, so please make sure all details are correct before submitting.
+Note: You can only submit the form once.
 
-Made with love by Storybook Vault
-        """
+Made with love by Storybook Vault"""
         
         import resend
-        resend.api_key = os.getenv("RESEND_API_KEY", "")
-        email_from = os.getenv("FROM_EMAIL", "noreply@example.com")
+        resend.api_key = os.getenv("RESEND_API_KEY", "").strip()
+        if not resend.api_key:
+            logger.error("[EMAIL] RESEND_API_KEY not configured — cannot send personalization email")
+            return
         
-        params = {
+        email_from = os.getenv("FROM_EMAIL", "noreply@example.com").strip()
+        params: resend.Emails.SendParams = {
             "from": f"Storybook Vault <{email_from}>",
             "to": [customer_email],
-            "subject": f"Complete your personalized storybook - {product_title}",
+            "subject": f"Personalize your storybook — {product_title}",
             "html": html_content,
             "text": text_content
         }
         
         response = resend.Emails.send(params)
+        email_id = response.get("id") if isinstance(response, dict) else getattr(response, "id", None)
         
-        if response and response.get("id"):
-            logger.info(f"Personalization email sent to {customer_email} for session {session_token}")
+        if email_id:
+            logger.info(f"[EMAIL] Sent ✓ resend_id={email_id} to {customer_email} for session {session_token}")
+            # Update session with email status
+            await db.personalization_sessions.update_one(
+                {"session_token": session_token},
+                {"$set": {
+                    "email_sent": True,
+                    "email_sent_at": datetime.now(timezone.utc).isoformat(),
+                    "resend_email_id": email_id
+                }}
+            )
         else:
-            logger.error(f"Failed to send personalization email: {response}")
+            logger.error(f"[EMAIL] Send returned no ID. Response: {response}")
             
     except Exception as e:
-        logger.error(f"Personalization email error for {session_token}: {str(e)}")
+        logger.error(
+            f"[EMAIL] Failed for session {session_token}: {type(e).__name__}: {str(e)}",
+            exc_info=True
+        )
 
 
 async def process_personalization_background(session_token: str):
@@ -1188,6 +1203,13 @@ async def polar_webhook(request: Request, background_tasks: BackgroundTasks):
         if event_type == "order.paid":
             # Parse the Polar webhook data
             parsed_data = webhook_handler.parse_polar_webhook(webhook_data)
+            
+            logger.info(
+                f"[POLAR WEBHOOK] Parsed: orderId={parsed_data.get('orderId')}, "
+                f"checkoutId={parsed_data.get('checkoutId')}, "
+                f"email={parsed_data.get('customerEmail')}, "
+                f"productSlug={parsed_data.get('productSlug')}"
+            )
             
             # Validate required fields
             if not parsed_data.get("productSlug"):
@@ -1312,11 +1334,14 @@ async def simulate_polar_webhook(request: Dict):
     try:
         # Build simulated Polar webhook payload
         order_id = str(uuid.uuid4())
+        # Use a distinct checkout_id that mimics what Polar would put in the redirect URL
+        sim_checkout_id = f"chk_sim_{order_id[:8]}"
         
         simulated_payload = {
             "type": "order.paid",
             "data": {
                 "id": order_id,
+                "checkout_id": sim_checkout_id,        # ← mirrors what Polar puts in redirect URL
                 "metadata": {
                     "product_slug": request.get("productSlug")
                 },
@@ -1381,8 +1406,11 @@ async def simulate_polar_webhook(request: Dict):
                 "success": True,
                 "message": "Personalization session created - customer must complete form",
                 "flow": "personalization",
+                "orderId": order_id,
+                "checkoutId": sim_checkout_id,
                 "sessionToken": result["sessionToken"],
                 "personalizationUrl": result["personalizationUrl"],
+                "successPageUrl": f"/personalization/success?checkout_id={sim_checkout_id}",
                 "session": session
             }
         else:
@@ -1419,13 +1447,21 @@ async def get_session_by_checkout(checkout_id: str):
     Used by the success page after Polar redirect.
     """
     try:
+        logger.info(f"[BY-CHECKOUT] Looking up checkout_id={checkout_id}")
         session = await session_manager.get_session_by_checkout(checkout_id)
         
         if not session:
+            logger.info(f"[BY-CHECKOUT] No session found for checkout_id={checkout_id}")
             return {
                 "status": "not_found",
                 "message": "Session not found. It may still be processing."
             }
+        
+        logger.info(
+            f"[BY-CHECKOUT] Found session: token={session.get('session_token')}, "
+            f"status={session.get('status')}, checkout_id={session.get('checkout_id')}, "
+            f"order_id={session.get('order_id')}"
+        )
         
         if session.get("status") == "ready":
             return {
@@ -1627,6 +1663,50 @@ async def get_personalization_upload(token: str, filename: str):
         raise HTTPException(status_code=404, detail="Image not found")
     
     return FileResponse(file_path)
+
+
+@api_router.post("/admin/personalization/sessions/{session_token}/resend-email")
+async def resend_personalization_email_admin(
+    session_token: str, background_tasks: BackgroundTasks
+):
+    """Admin: resend the personalization link email to the customer"""
+    session = await db.personalization_sessions.find_one(
+        {"session_token": session_token}, {"_id": 0}
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.get("status") in ("completed", "expired"):
+        raise HTTPException(status_code=400, detail=f"Cannot resend: session is {session['status']}")
+    background_tasks.add_task(send_personalization_email, session_token)
+    logger.info(f"[ADMIN] Resending personalization email for session {session_token}")
+    return {"success": True, "message": "Email queued for sending"}
+
+
+@api_router.get("/admin/personalization/sessions")
+async def list_personalization_sessions_admin(
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0
+):
+    """Admin endpoint to list personalization sessions"""
+    try:
+        query = {}
+        if status and status != "all":
+            query["status"] = status
+
+        total = await db.personalization_sessions.count_documents(query)
+
+        sessions = await db.personalization_sessions.find(query, {"_id": 0}) \
+            .sort("created_at", -1) \
+            .skip(offset) \
+            .limit(limit) \
+            .to_list(limit)
+
+        return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
+
+    except Exception as e:
+        logger.error(f"Error listing sessions: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to list sessions")
 
 
 @api_router.get("/personalization/sessions")
