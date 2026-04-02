@@ -429,8 +429,8 @@ class PersonalizationProcessor:
         
         storybook_title = f"{name_for_title}'s {template_title}"
         
-        # Get password if in personalization data
-        password = personalization_data.get("password")
+        # Get password from view_password field (built-in system field) or legacy password field
+        password = personalization_data.get("view_password") or personalization_data.get("password")
         
         # Get styling defaults
         styling_defaults = snapshot.get("stylingDefaults")
@@ -480,8 +480,8 @@ class PersonalizationProcessor:
             base_url = os.getenv("APP_BASE_URL", "http://localhost:3000").rstrip('/')
             full_view_url = f"{base_url}{flipbook_data['customerViewUrl']}"
             
-            # Get password from personalization data
-            password = personalization_data.get("password")
+            # Get password from view_password (system field) or legacy password field
+            password = personalization_data.get("view_password") or personalization_data.get("password")
             
             email_sent = await EmailSender.send_storybook_delivery_email(
                 to_email=customer_email,
@@ -491,6 +491,16 @@ class PersonalizationProcessor:
                 password=password,
                 order_id=session.get("order_id", "")
             )
+            
+            # Update session with delivery email status
+            if email_sent:
+                await self.db.personalization_sessions.update_one(
+                    {"session_token": session["session_token"]},
+                    {"$set": {
+                        "delivery_email_sent": True,
+                        "delivery_email_sent_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
             
             logger.info(f"Delivery email {'sent' if email_sent else 'FAILED'} for session {session['session_token']}")
             

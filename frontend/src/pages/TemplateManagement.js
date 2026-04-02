@@ -641,6 +641,7 @@ function FieldMapperModal({ template, onClose }) {
             <FieldDefinitionsEditor
               fieldDefinitions={fieldDefinitions}
               onChange={setFieldDefinitions}
+              spreadBlocks={template.spread_blocks || []}
             />
           )}
 
@@ -966,10 +967,22 @@ function UploadModal({ fileName, onSubmit, onClose }) {
 // ── Field Definitions Editor ──────────────────────────────────────────────────
 const FIELD_TYPES = ['text', 'textarea', 'image', 'date', 'select'];
 
-function FieldDefinitionsEditor({ fieldDefinitions, onChange }) {
+// Built-in system password field (shown in preview but not editable)
+const SYSTEM_PASSWORD_FIELD = {
+  field_key: 'view_password',
+  label: 'Password for your storybook link',
+  type: 'password',
+  required: false,
+  placeholder: 'Optional',
+  help_text: 'Leave blank if you want the storybook link to open without a password.',
+  is_system_field: true
+};
+
+function FieldDefinitionsEditor({ fieldDefinitions, onChange, spreadBlocks = [] }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editIndex, setEditIndex] = useState(null);
   const [form, setForm] = useState(newFieldForm());
+  const [showPreview, setShowPreview] = useState(true);
 
   function newFieldForm() {
     return {
@@ -1056,14 +1069,62 @@ function FieldDefinitionsEditor({ fieldDefinitions, onChange }) {
     onChange(arr);
   };
 
+  // Check field usage in spread blocks
+  const getFieldUsage = (fieldKey) => {
+    const usedIn = spreadBlocks.filter(block => 
+      block.text_template && block.text_template.includes(`[${fieldKey}]`)
+    );
+    return usedIn.length > 0;
+  };
+
+  // Find placeholders in spread blocks that don't have field definitions
+  const getUndefinedPlaceholders = () => {
+    const allPlaceholders = new Set();
+    spreadBlocks.forEach(block => {
+      if (block.text_template) {
+        const matches = block.text_template.match(/\[(\w+)\]/g) || [];
+        matches.forEach(m => {
+          const key = m.slice(1, -1);
+          allPlaceholders.add(key);
+        });
+      }
+    });
+    
+    const definedKeys = new Set(fieldDefinitions.map(f => f.field_key));
+    return Array.from(allPlaceholders).filter(p => !definedKeys.has(p));
+  };
+
+  const undefinedPlaceholders = getUndefinedPlaceholders();
+
   return (
-    <div className="space-y-4">
-      <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-        <p className="text-sm text-purple-900">
-          <strong>Field Definitions</strong> — Define the form fields customers will fill out to personalize their storybook.
-          Use these field keys as <span className="font-mono bg-purple-100 px-1 rounded">[field_key]</span> tokens in Spread Blocks.
-        </p>
-      </div>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Left: Field Definitions */}
+      <div className="space-y-4">
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+          <p className="text-sm text-purple-900">
+            <strong>Field Definitions</strong> — Define the form fields customers will fill out to personalize their storybook.
+            Use these field keys as <span className="font-mono bg-purple-100 px-1 rounded">[field_key]</span> tokens in Spread Blocks.
+          </p>
+        </div>
+
+        {/* Validation Warnings */}
+        {undefinedPlaceholders.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <p className="text-sm text-amber-800 font-medium mb-1">
+              Undefined placeholders in spread blocks:
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {undefinedPlaceholders.map(p => (
+                <span key={p} className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded font-mono text-xs">
+                  [{p}]
+                </span>
+              ))}
+            </div>
+            <p className="text-xs text-amber-600 mt-2">
+              Add field definitions for these placeholders to enable customer input.
+            </p>
+          </div>
+        )}
 
       {/* Field List */}
       {fieldDefinitions.length > 0 ? (
@@ -1100,6 +1161,11 @@ function FieldDefinitionsEditor({ fieldDefinitions, onChange }) {
                   <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{field.type}</span>
                   {field.required && (
                     <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">required</span>
+                  )}
+                  {getFieldUsage(field.field_key) ? (
+                    <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">used in blocks</span>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs">not used</span>
                   )}
                 </div>
                 {field.placeholder && (
@@ -1274,6 +1340,112 @@ function FieldDefinitionsEditor({ fieldDefinitions, onChange }) {
           <Plus size={16} />
           Add Field Definition
         </button>
+      )}
+      </div>
+
+      {/* Right: Live Form Preview */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-medium text-gray-900">Live Form Preview</h3>
+          <button
+            onClick={() => setShowPreview(!showPreview)}
+            className="text-sm text-purple-600 hover:text-purple-700"
+          >
+            {showPreview ? 'Hide' : 'Show'} Preview
+          </button>
+        </div>
+        
+        {showPreview && (
+          <div className="border-2 border-gray-200 rounded-xl bg-gray-50 p-4">
+            <div className="bg-white rounded-lg shadow-sm p-6 space-y-4">
+              {fieldDefinitions.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <Eye size={32} className="mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">Add fields to see preview</p>
+                </div>
+              ) : (
+                <>
+                  {/* User-defined fields preview */}
+                  {fieldDefinitions.map(field => (
+                    <FormFieldPreview key={field.field_key} field={field} />
+                  ))}
+                  
+                  {/* System password field (always shown) */}
+                  <div className="border-t border-gray-100 pt-4 mt-4">
+                    <p className="text-xs text-gray-400 mb-3">System Fields (auto-added)</p>
+                    <FormFieldPreview field={SYSTEM_PASSWORD_FIELD} />
+                  </div>
+                </>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 text-center mt-3">
+              This is how the form will appear to customers
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Form Field Preview Component
+function FormFieldPreview({ field }) {
+  const baseClass = "w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-400";
+  
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {field.label}
+        {field.required && <span className="text-red-500 ml-1">*</span>}
+        {field.is_system_field && (
+          <span className="ml-2 text-xs text-gray-400">(system)</span>
+        )}
+      </label>
+      
+      {field.type === 'text' || field.type === 'password' && (
+        <input
+          type={field.type}
+          placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+          disabled
+          className={baseClass}
+        />
+      )}
+      
+      {field.type === 'textarea' && (
+        <textarea
+          placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+          disabled
+          rows={3}
+          className={`${baseClass} resize-none`}
+        />
+      )}
+      
+      {field.type === 'date' && (
+        <input
+          type="date"
+          disabled
+          className={baseClass}
+        />
+      )}
+      
+      {field.type === 'select' && (
+        <select disabled className={baseClass}>
+          <option>Select an option...</option>
+          {(field.options || []).map(opt => (
+            <option key={opt}>{opt}</option>
+          ))}
+        </select>
+      )}
+      
+      {field.type === 'image' && (
+        <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center bg-gray-50">
+          <Upload size={20} className="mx-auto text-gray-300 mb-1" />
+          <p className="text-xs text-gray-400">Click to upload image</p>
+        </div>
+      )}
+      
+      {field.help_text && (
+        <p className="text-xs text-gray-400 mt-1">{field.help_text}</p>
       )}
     </div>
   );

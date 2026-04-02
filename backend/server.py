@@ -1582,6 +1582,32 @@ async def submit_personalization(
         raise HTTPException(status_code=500, detail="Failed to submit personalization")
 
 
+@api_router.get("/personalization/session/{token}/status")
+async def get_session_status(token: str):
+    """
+    Get session status for post-submit polling.
+    Used by frontend to poll for completion after form submission.
+    """
+    try:
+        session = await session_manager.get_session_by_token(token)
+        
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        return {
+            "status": session.get("status"),
+            "customer_view_url": session.get("customer_view_url"),
+            "storybook_id": session.get("storybook_id"),
+            "error_message": session.get("error_message")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching session status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch session status")
+
+
 @api_router.post("/personalization/session/{token}/upload-image")
 async def upload_personalization_image(
     token: str,

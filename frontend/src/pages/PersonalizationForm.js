@@ -1,12 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Loader2, CheckCircle, AlertCircle, Upload, X, Image as ImageIcon,
-  Lock, Send, BookOpen
+  Lock, Send, BookOpen, Eye, EyeOff, ExternalLink
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+
+// Polling constants for post-submit status check
+const STATUS_POLL_INTERVAL_MS = 2000;
+const STATUS_MAX_POLLS = 60; // 2 minutes max
 
 function PersonalizationForm() {
   const { token } = useParams();
@@ -20,6 +24,11 @@ function PersonalizationForm() {
   const [formData, setFormData] = useState({});
   const [formErrors, setFormErrors] = useState({});
   const [uploadingField, setUploadingField] = useState(null);
+  
+  // Post-submit polling state
+  const [isPollingStatus, setIsPollingStatus] = useState(false);
+  const [generationComplete, setGenerationComplete] = useState(false);
+  const [finalViewUrl, setFinalViewUrl] = useState(null);
   
   // Load session data
   useEffect(() => {
@@ -41,6 +50,12 @@ function PersonalizationForm() {
         const data = await response.json();
         setSession(data);
         
+        // Check if already completed
+        if (data.status === 'completed' && data.customer_view_url) {
+          setGenerationComplete(true);
+          setFinalViewUrl(data.customer_view_url);
+        }
+        
         // Pre-fill form if data exists (for viewing submitted data)
         if (data.personalization_data && Object.keys(data.personalization_data).length > 0) {
           setFormData(data.personalization_data);
@@ -56,6 +71,68 @@ function PersonalizationForm() {
     
     loadSession();
   }, [token]);
+  
+  // Poll for generation status after submission
+  const pollStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/personalization/session/${token}/status`);
+      if (!response.ok) return false;
+      
+      const data = await response.json();
+      
+      if (data.status === 'completed' && data.customer_view_url) {
+        setGenerationComplete(true);
+        setFinalViewUrl(data.customer_view_url);
+        setSession(prev => ({ ...prev, status: 'completed', customer_view_url: data.customer_view_url }));
+        return true; // Stop polling
+      }
+      
+      if (data.status === 'failed') {
+        toast.error(data.error_message || 'Storybook generation failed. Please contact support.');
+        setSession(prev => ({ ...prev, status: 'failed' }));
+        return true; // Stop polling
+      }
+      
+      return false; // Continue polling
+    } catch {
+      return false;
+    }
+  }, [token]);
+  
+  // Start polling after successful submission
+  useEffect(() => {
+    if (!isPollingStatus) return;
+    
+    let pollCount = 0;
+    let timer = null;
+    let stopped = false;
+    
+    const runPoll = async () => {
+      if (stopped) return;
+      pollCount++;
+      
+      const done = await pollStatus();
+      if (done || stopped) {
+        setIsPollingStatus(false);
+        return;
+      }
+      
+      if (pollCount >= STATUS_MAX_POLLS) {
+        setIsPollingStatus(false);
+        toast.info('Your storybook is still being generated. Check your email for the final link.');
+        return;
+      }
+      
+      timer = setTimeout(runPoll, STATUS_POLL_INTERVAL_MS);
+    };
+    
+    runPoll();
+    
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [isPollingStatus, pollStatus]);
   
   // Handle text input changes
   const handleInputChange = (fieldKey, value) => {
@@ -145,6 +222,11 @@ function PersonalizationForm() {
     fieldDefs.forEach(field => {
       const value = formData[field.field_key];
       
+      // Skip validation for optional system fields (like view_password)
+      if (field.is_system_field && !field.required) {
+        return;
+      }
+      
       if (field.required) {
         if (field.type === 'image') {
           if (!value || !value.url) {
@@ -225,12 +307,15 @@ function PersonalizationForm() {
       
       toast.success('Personalization submitted! Your storybook is being generated.');
       
-      // Update session state to show locked
+      // Update session state to show generating
       setSession(prev => ({
         ...prev,
         status: 'submitted',
         form_locked: true
       }));
+      
+      // Start polling for completion
+      setIsPollingStatus(true);
       
     } catch (err) {
       console.error('Submit error:', err);
@@ -265,8 +350,16 @@ function PersonalizationForm() {
     );
   }
   
-  const isLocked = session?.form_locked || session?.status === 'submitted' || session?.status === 'completed';
+  const isLocked = session?.form_locked || session?.status === 'submitted' || session?.status === 'completed' || session?.status === 'processing';
   const fieldDefinitions = session?.field_definitions || [];
+  
+  // Check if there are no fields configured
+  const hasNoFields = fieldDefinitions.length === 0 || 
+    fieldDefinitions.every(f => f.is_system_field);
+  
+  // Separate user fields and system fields
+  const userFields = fieldDefinitions.filter(f => !f.is_system_field);
+  const systemFields = fieldDefinitions.filter(f => f.is_system_field);
   
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 py-8 px-4">
@@ -286,8 +379,26 @@ function PersonalizationForm() {
         
         {/* Form Card */}
         <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+          {/* No Fields Error State */}
+          {hasNoFields && !isLocked && (
+            <div className="bg-yellow-50 border-b border-yellow-100 px-6 py-6">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="font-semibold text-yellow-800 mb-1">
+                    No personalization fields configured
+                  </h3>
+                  <p className="text-yellow-700 text-sm">
+                    This storybook template doesn't have any personalization fields set up yet. 
+                    Please contact support or check back later.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {/* Instructions Banner */}
-          {!isLocked && (
+          {!isLocked && !hasNoFields && (
             <div className="bg-purple-50 border-b border-purple-100 px-6 py-4">
               <p className="text-purple-800 text-sm">
                 <strong>Fill in the details below</strong> to personalize your storybook. 
@@ -296,21 +407,61 @@ function PersonalizationForm() {
             </div>
           )}
           
-          {/* Locked Banner */}
-          {isLocked && (
-            <div className="bg-green-50 border-b border-green-100 px-6 py-4">
-              <div className="flex items-center gap-2 text-green-800">
+          {/* Generation Complete Banner */}
+          {generationComplete && finalViewUrl && (
+            <div className="bg-green-50 border-b border-green-100 px-6 py-6">
+              <div className="flex items-center gap-2 text-green-800 mb-3">
+                <CheckCircle className="w-6 h-6" />
+                <span className="font-semibold text-lg">Your storybook is ready!</span>
+              </div>
+              <a 
+                href={finalViewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition-colors"
+                data-testid="view-storybook-link"
+              >
+                <ExternalLink className="w-5 h-5" />
+                View Your Storybook
+              </a>
+              <p className="text-green-700 text-sm mt-3">
+                A link has also been sent to your email.
+              </p>
+            </div>
+          )}
+          
+          {/* Generating State */}
+          {isPollingStatus && !generationComplete && (
+            <div className="bg-blue-50 border-b border-blue-100 px-6 py-6">
+              <div className="flex items-center gap-3">
+                <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+                <div>
+                  <span className="font-semibold text-blue-800">Generating your storybook...</span>
+                  <p className="text-blue-600 text-sm mt-1">
+                    This usually takes less than a minute. Please don't close this page.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Locked Banner (submitted but not generation complete yet) */}
+          {isLocked && !generationComplete && !isPollingStatus && (
+            <div className="bg-amber-50 border-b border-amber-100 px-6 py-4">
+              <div className="flex items-center gap-2 text-amber-800">
                 <Lock className="w-5 h-5" />
                 <span className="font-medium">
-                  {session?.status === 'completed' 
-                    ? 'Your storybook is ready!' 
-                    : 'Your storybook is being generated...'}
+                  {session?.status === 'processing' 
+                    ? 'Your storybook is being generated...' 
+                    : session?.status === 'failed'
+                    ? 'Generation failed. Please contact support.'
+                    : 'Form submitted. Processing your storybook...'}
                 </span>
               </div>
               {session?.customer_view_url && (
                 <a 
                   href={session.customer_view_url}
-                  className="inline-flex items-center gap-2 mt-3 text-green-700 hover:text-green-800 font-medium"
+                  className="inline-flex items-center gap-2 mt-3 text-amber-700 hover:text-amber-800 font-medium"
                 >
                   <CheckCircle className="w-4 h-4" />
                   View Your Storybook
@@ -321,7 +472,8 @@ function PersonalizationForm() {
           
           {/* Form */}
           <form onSubmit={handleSubmit} className="p-6 space-y-6">
-            {fieldDefinitions.map(field => (
+            {/* User-defined fields */}
+            {userFields.map(field => (
               <FieldInput
                 key={field.field_key}
                 field={field}
@@ -336,8 +488,29 @@ function PersonalizationForm() {
               />
             ))}
             
+            {/* System fields (like password) - shown in a separate section */}
+            {systemFields.length > 0 && !isLocked && (
+              <div className="border-t border-gray-100 pt-6 mt-6">
+                <h3 className="text-sm font-medium text-gray-500 mb-4">Optional Settings</h3>
+                {systemFields.map(field => (
+                  <FieldInput
+                    key={field.field_key}
+                    field={field}
+                    value={formData[field.field_key]}
+                    error={formErrors[field.field_key]}
+                    disabled={isLocked}
+                    uploading={uploadingField === field.field_key}
+                    onChange={(value) => handleInputChange(field.field_key, value)}
+                    onUpload={(file) => handleImageUpload(field.field_key, file)}
+                    onRemoveImage={() => handleRemoveImage(field.field_key)}
+                    token={token}
+                  />
+                ))}
+              </div>
+            )}
+            
             {/* Submit Button */}
-            {!isLocked && (
+            {!isLocked && !hasNoFields && (
               <div className="pt-4">
                 <button
                   type="submit"
@@ -382,10 +555,47 @@ function FieldInput({
   onChange, onUpload, onRemoveImage, token 
 }) {
   const fileInputRef = useRef(null);
+  const [showPassword, setShowPassword] = useState(false);
   
   const baseInputClass = `w-full px-4 py-3 border rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 ${
     error ? 'border-red-300 bg-red-50' : 'border-gray-200'
   } ${disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'}`;
+  
+  // Password input (for system view_password field)
+  if (field.type === 'password') {
+    return (
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          {field.label}
+          {field.required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+        <div className="relative">
+          <input
+            type={showPassword ? 'text' : 'password'}
+            value={value || ''}
+            onChange={(e) => onChange(e.target.value)}
+            disabled={disabled}
+            placeholder={field.placeholder}
+            maxLength={field.max_length}
+            className={`${baseInputClass} pr-12`}
+            data-testid={`field-${field.field_key}`}
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            tabIndex={-1}
+          >
+            {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+          </button>
+        </div>
+        {field.help_text && !error && (
+          <p className="text-xs text-gray-400 mt-1">{field.help_text}</p>
+        )}
+        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      </div>
+    );
+  }
   
   // Text input
   if (field.type === 'text') {

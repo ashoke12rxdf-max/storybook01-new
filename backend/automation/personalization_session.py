@@ -4,7 +4,7 @@ Handles creation, retrieval, and submission of personalization sessions.
 """
 
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 import logging
 import os
 import re
@@ -20,6 +20,20 @@ logger = logging.getLogger(__name__)
 
 # Session expiry in days
 SESSION_EXPIRY_DAYS = int(os.getenv("SESSION_EXPIRY_DAYS", "30"))
+
+# Built-in system field: optional password for storybook access
+SYSTEM_PASSWORD_FIELD = {
+    "field_key": "view_password",
+    "label": "Password for your storybook link",
+    "type": "password",
+    "required": False,
+    "placeholder": "Optional",
+    "help_text": "Leave blank if you want the storybook link to open without a password.",
+    "max_length": 50,
+    "options": [],
+    "validation_regex": None,
+    "is_system_field": True
+}
 
 
 class PersonalizationSessionManager:
@@ -67,13 +81,21 @@ class PersonalizationSessionManager:
                 "is_existing": True
             }
         
-        # Create template snapshot
+        # Get field definitions and inject system password field
+        field_definitions = list(template.get("field_definitions", []))
+        
+        # Inject built-in optional password field if not already present
+        has_password_field = any(f.get("field_key") == "view_password" for f in field_definitions)
+        if not has_password_field:
+            field_definitions.append(SYSTEM_PASSWORD_FIELD)
+        
+        # Create template snapshot with injected fields
         snapshot = TemplateSnapshot(
             productSlug=template["productSlug"],
             basePdfPath=template["basePdfPath"],
             title=template["title"],
             fieldMappings=template.get("fieldMappings", []),
-            field_definitions=template.get("field_definitions", []),
+            field_definitions=field_definitions,
             spread_blocks=template.get("spread_blocks", []),
             pageCount=template.get("pageCount", 0),
             orientation=template.get("orientation", "landscape"),
