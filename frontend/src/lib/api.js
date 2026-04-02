@@ -140,6 +140,31 @@ export const api = {
     return response.data;
   },
 
+  // ==================== SPREAD BLOCK EDITOR API ====================
+
+  getTemplateSpreads: async (templateId) => {
+    const response = await apiClient.get(`/admin/templates/${templateId}/spreads`);
+    return response.data;
+  },
+
+  getSpreadBlocks: async (templateId, spreadId) => {
+    const response = await apiClient.get(`/admin/templates/${templateId}/spreads/${spreadId}`);
+    return response.data;
+  },
+
+  updateSpreadBlocks: async (templateId, spreadId, blocks) => {
+    const response = await apiClient.put(
+      `/admin/templates/${templateId}/spreads/${spreadId}/blocks`,
+      blocks
+    );
+    return response.data;
+  },
+
+  updateTemplateFieldDefinitions: async (templateId, fieldDefinitions) => {
+    const response = await apiClient.put(`/templates/${templateId}`, { field_definitions: fieldDefinitions });
+    return response.data;
+  },
+
   // Polar Settings
   getPolarSettings: async () => {
     const response = await apiClient.get('/settings/polar');

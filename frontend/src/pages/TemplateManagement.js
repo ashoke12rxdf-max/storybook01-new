@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Upload, FileText, Settings, Eye, Trash2, Check, X, Play, Square, Volume2, Type, Palette, BookOpen } from 'lucide-react';
+import { Upload, FileText, Settings, Eye, Trash2, Check, X, Play, Square, Volume2, Type, Palette, BookOpen, Plus, GripVertical, ChevronUp, ChevronDown, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
@@ -228,6 +228,7 @@ function TemplateManagement({ standalone = true }) {
 }
 
 function TemplateCard({ template, onStatusChange, onDelete, onViewDetails, getStatusBadge }) {
+  const navigate = useNavigate();
   const styling = template.stylingDefaults || {};
   const requiresPersonalization = (template.field_definitions?.length || 0) > 0;
   
@@ -259,6 +260,12 @@ function TemplateCard({ template, onStatusChange, onDelete, onViewDetails, getSt
               <>
                 <span>•</span>
                 <span className="text-purple-600 font-medium">{template.field_definitions?.length || 0} personalization fields</span>
+              </>
+            )}
+            {(template.spread_blocks?.length || 0) > 0 && (
+              <>
+                <span>•</span>
+                <span className="text-blue-600 font-medium">{template.spread_blocks.length} spread blocks</span>
               </>
             )}
           </div>
@@ -297,9 +304,18 @@ function TemplateCard({ template, onStatusChange, onDelete, onViewDetails, getSt
         {/* Actions */}
         <div className="flex items-center gap-2">
           <button
+            onClick={() => navigate(`/admin/templates/${template.id}/spread-editor`)}
+            className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            title="Edit Spread Layout"
+            data-testid={`spread-editor-btn-${template.id}`}
+          >
+            <Layers size={20} />
+          </button>
+
+          <button
             onClick={() => onViewDetails(template)}
             className="p-2 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-            title="View & Map Fields"
+            title="Template Settings"
           >
             <Settings size={20} />
           </button>
@@ -341,6 +357,7 @@ function TemplateCard({ template, onStatusChange, onDelete, onViewDetails, getSt
 
 function FieldMapperModal({ template, onClose }) {
   const [fieldMappings, setFieldMappings] = useState(template.fieldMappings || []);
+  const [fieldDefinitions, setFieldDefinitions] = useState(template.field_definitions || []);
   const [stylingDefaults, setStylingDefaults] = useState(template.stylingDefaults || {
     fontId: null,
     fontName: null,
@@ -353,7 +370,7 @@ function FieldMapperModal({ template, onClose }) {
     accentColor: '#C9A86A'
   });
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState('mapping'); // 'mapping' | 'styling'
+  const [activeTab, setActiveTab] = useState('mapping'); // 'mapping' | 'fields' | 'styling'
   const [fonts, setFonts] = useState([]);
   const [sounds, setSounds] = useState([]);
   const [loadingAssets, setLoadingAssets] = useState(true);
@@ -462,7 +479,8 @@ function FieldMapperModal({ template, onClose }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           fieldMappings,
-          stylingDefaults 
+          stylingDefaults,
+          field_definitions: fieldDefinitions
         })
       });
 
@@ -521,6 +539,24 @@ function FieldMapperModal({ template, onClose }) {
             <div className="flex items-center gap-2">
               <FileText size={18} />
               Field Mapping
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveTab('fields')}
+            className={`px-4 py-3 font-medium transition-all border-b-2 -mb-px ${
+              activeTab === 'fields'
+                ? 'border-purple-600 text-purple-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Layers size={18} />
+              Field Definitions
+              {fieldDefinitions.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs">
+                  {fieldDefinitions.length}
+                </span>
+              )}
             </div>
           </button>
           <button
@@ -605,6 +641,13 @@ function FieldMapperModal({ template, onClose }) {
                 </p>
               </div>
             </>
+          )}
+
+          {activeTab === 'fields' && (
+            <FieldDefinitionsEditor
+              fieldDefinitions={fieldDefinitions}
+              onChange={setFieldDefinitions}
+            />
           )}
 
           {activeTab === 'styling' && (
@@ -798,6 +841,322 @@ function FieldMapperModal({ template, onClose }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Field Definitions Editor ──────────────────────────────────────────────────
+const FIELD_TYPES = ['text', 'textarea', 'image', 'date', 'select'];
+
+function FieldDefinitionsEditor({ fieldDefinitions, onChange }) {
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editIndex, setEditIndex] = useState(null);
+  const [form, setForm] = useState(newFieldForm());
+
+  function newFieldForm() {
+    return {
+      field_key: '',
+      label: '',
+      type: 'text',
+      required: true,
+      placeholder: '',
+      help_text: '',
+      max_length: '',
+      options: '',
+    };
+  }
+
+  const openAdd = () => {
+    setForm(newFieldForm());
+    setEditIndex(null);
+    setShowAddForm(true);
+  };
+
+  const openEdit = (idx) => {
+    const f = fieldDefinitions[idx];
+    setForm({
+      ...f,
+      max_length: f.max_length ? String(f.max_length) : '',
+      options: (f.options || []).join(', '),
+    });
+    setEditIndex(idx);
+    setShowAddForm(true);
+  };
+
+  const handleSaveField = () => {
+    if (!form.field_key.trim()) {
+      toast.error('Field key is required');
+      return;
+    }
+    if (!form.label.trim()) {
+      toast.error('Label is required');
+      return;
+    }
+    // Validate no spaces in field_key
+    if (/\s/.test(form.field_key)) {
+      toast.error('Field key cannot contain spaces');
+      return;
+    }
+
+    const newField = {
+      field_key: form.field_key.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+      label: form.label,
+      type: form.type,
+      required: form.required,
+      placeholder: form.placeholder,
+      help_text: form.help_text,
+      max_length: form.max_length ? parseInt(form.max_length) : null,
+      options: form.type === 'select' ? form.options.split(',').map(o => o.trim()).filter(Boolean) : [],
+      validation_regex: null,
+    };
+
+    if (editIndex !== null) {
+      const updated = [...fieldDefinitions];
+      updated[editIndex] = newField;
+      onChange(updated);
+    } else {
+      // Check duplicate key
+      if (fieldDefinitions.some(f => f.field_key === newField.field_key)) {
+        toast.error(`Field key "${newField.field_key}" already exists`);
+        return;
+      }
+      onChange([...fieldDefinitions, newField]);
+    }
+
+    setShowAddForm(false);
+  };
+
+  const deleteField = (idx) => {
+    onChange(fieldDefinitions.filter((_, i) => i !== idx));
+  };
+
+  const moveField = (idx, dir) => {
+    const arr = [...fieldDefinitions];
+    const target = idx + dir;
+    if (target < 0 || target >= arr.length) return;
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    onChange(arr);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+        <p className="text-sm text-purple-900">
+          <strong>Field Definitions</strong> — Define the form fields customers will fill out to personalize their storybook.
+          Use these field keys as <span className="font-mono bg-purple-100 px-1 rounded">[field_key]</span> tokens in Spread Blocks.
+        </p>
+      </div>
+
+      {/* Field List */}
+      {fieldDefinitions.length > 0 ? (
+        <div className="space-y-2">
+          {fieldDefinitions.map((field, idx) => (
+            <div
+              key={field.field_key}
+              className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg"
+              data-testid={`field-def-${field.field_key}`}
+            >
+              {/* Reorder */}
+              <div className="flex flex-col gap-0.5">
+                <button
+                  onClick={() => moveField(idx, -1)}
+                  disabled={idx === 0}
+                  className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30"
+                >
+                  <ChevronUp size={14} />
+                </button>
+                <button
+                  onClick={() => moveField(idx, 1)}
+                  disabled={idx === fieldDefinitions.length - 1}
+                  className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30"
+                >
+                  <ChevronDown size={14} />
+                </button>
+              </div>
+
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-sm font-semibold text-gray-900">{field.field_key}</span>
+                  <span className="text-xs text-gray-500">{field.label}</span>
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{field.type}</span>
+                  {field.required && (
+                    <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">required</span>
+                  )}
+                </div>
+                {field.placeholder && (
+                  <p className="text-xs text-gray-400 mt-0.5 truncate">Placeholder: {field.placeholder}</p>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => openEdit(idx)}
+                  className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                  title="Edit"
+                >
+                  <Settings size={15} />
+                </button>
+                <button
+                  onClick={() => deleteField(idx)}
+                  className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                  title="Delete"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        !showAddForm && (
+          <div className="text-center py-8 text-gray-400">
+            <Layers size={32} className="mx-auto mb-2" />
+            <p className="text-sm">No field definitions yet</p>
+            <p className="text-xs mt-1">Add fields for customers to personalize their storybook</p>
+          </div>
+        )
+      )}
+
+      {/* Add Field Form */}
+      {showAddForm && (
+        <div className="border-2 border-purple-200 rounded-lg p-4 bg-purple-50 space-y-3">
+          <h4 className="font-semibold text-gray-900 text-sm">
+            {editIndex !== null ? 'Edit Field' : 'New Field Definition'}
+          </h4>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Field Key *</label>
+              <input
+                type="text"
+                value={form.field_key}
+                onChange={e => setForm(p => ({ ...p, field_key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') }))}
+                placeholder="dad_name"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
+                data-testid="field-key-input"
+                disabled={editIndex !== null}
+              />
+              <p className="text-xs text-gray-400 mt-0.5">Used as [field_key] token</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Label *</label>
+              <input
+                type="text"
+                value={form.label}
+                onChange={e => setForm(p => ({ ...p, label: e.target.value }))}
+                placeholder="Father's Name"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                data-testid="field-label-input"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Type</label>
+              <select
+                value={form.type}
+                onChange={e => setForm(p => ({ ...p, type: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                data-testid="field-type-select"
+              >
+                {FIELD_TYPES.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Max Length</label>
+              <input
+                type="number"
+                value={form.max_length}
+                onChange={e => setForm(p => ({ ...p, max_length: e.target.value }))}
+                placeholder="50"
+                min={1}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+            </div>
+            <div className="flex items-end pb-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.required}
+                  onChange={e => setForm(p => ({ ...p, required: e.target.checked }))}
+                  className="w-4 h-4 text-purple-600 rounded"
+                  data-testid="field-required-check"
+                />
+                <span className="text-sm font-medium text-gray-700">Required</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Placeholder</label>
+              <input
+                type="text"
+                value={form.placeholder}
+                onChange={e => setForm(p => ({ ...p, placeholder: e.target.value }))}
+                placeholder="e.g. Enter dad's name"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Help Text</label>
+              <input
+                type="text"
+                value={form.help_text}
+                onChange={e => setForm(p => ({ ...p, help_text: e.target.value }))}
+                placeholder="Shown below the input"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          {form.type === 'select' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Options (comma-separated)</label>
+              <input
+                type="text"
+                value={form.options}
+                onChange={e => setForm(p => ({ ...p, options: e.target.value }))}
+                placeholder="Option 1, Option 2, Option 3"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={handleSaveField}
+              className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors font-medium"
+              data-testid="save-field-def-btn"
+            >
+              {editIndex !== null ? 'Update Field' : 'Add Field'}
+            </button>
+            <button
+              onClick={() => setShowAddForm(false)}
+              className="px-4 py-2 text-gray-700 text-sm rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Add Button */}
+      {!showAddForm && (
+        <button
+          onClick={openAdd}
+          className="flex items-center gap-2 px-4 py-2 border-2 border-dashed border-purple-300 text-purple-600 rounded-lg hover:bg-purple-50 transition-colors w-full justify-center text-sm font-medium"
+          data-testid="add-field-def-btn"
+        >
+          <Plus size={16} />
+          Add Field Definition
+        </button>
+      )}
     </div>
   );
 }

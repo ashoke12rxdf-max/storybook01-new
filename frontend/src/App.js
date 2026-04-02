@@ -8,6 +8,7 @@ import CustomerViewer from '@/pages/CustomerViewer';
 import DiagnosticPage from '@/pages/DiagnosticPage';
 import PersonalizationSuccess from '@/pages/PersonalizationSuccess';
 import PersonalizationForm from '@/pages/PersonalizationForm';
+import SpreadBlockEditor from '@/pages/SpreadBlockEditor';
 import { AuthProvider } from '@/context/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
@@ -39,6 +40,11 @@ function App() {
           {/* Personalization Routes */}
           <Route path="/personalization/success" element={<PersonalizationSuccess />} />
           <Route path="/personalize/:token" element={<PersonalizationForm />} />
+
+          {/* Spread Block Editor */}
+          <Route path="/admin/templates/:templateId/spread-editor" element={
+            <ProtectedRoute><SpreadBlockEditor /></ProtectedRoute>
+          } />
         </Routes>
         <Toaster position="top-right" />
       </BrowserRouter>
