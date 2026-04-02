@@ -29,7 +29,25 @@ for "Storybook Vault" without changing existing code, then implement admin featu
 - Live preview modal inside SpreadBlockEditor
 - Quick-Define custom fields directly inside the spread editor
 
-### Phase 3 — Spread Editor Fixes (Session 2 — Current)
+### Phase 4 — Polar Flow Debug (Session 3 — Current)
+**Problem:** Payment succeeds, success page loops → "check email", form never opens, email never arrives,
+sometimes storybook generated without personalization.
+
+**Root Causes Fixed:**
+
+| # | Bug | Fix |
+|---|-----|-----|
+| 1 | `parse_polar_webhook` never extracted `data.checkout_id` → session stored with `order_id` as `checkout_id` → `by-checkout` lookup always failed | Added `data.get("checkout_id")` extraction; `checkoutId` now returned from parser |
+| 2 | `get_session_by_checkout` had no fallback | Added 3-level fallback: `checkout_id` → `order_id` → `external_order_id` |
+| 3 | `requestedName=None` from Polar payload caused Pydantic 500 | Added `or ""` guard to the `requested_name` extraction chain |
+| 4 | `requestedName` hard-required in `_create_order` | Made it optional; only `customerEmail` is required |
+| 5 | No debug logging anywhere in flow | Added `[POLAR PARSE]`, `[PERSONALIZATION FLOW]`, `[SESSION CREATED]`, `[BY-CHECKOUT]`, `[EMAIL]` logs |
+| 6 | `send_personalization_email` swallowed all errors; didn't update session | Now logs Resend ID, updates `email_sent`, `email_sent_at`, `resend_email_id` in session |
+| 7 | `simulate_polar_webhook` didn't inject `checkout_id` | Now generates `chk_sim_xxx` and returns `checkoutId` + `successPageUrl` in response |
+| 8 | Success page timeout only 30s | Increased to 60s (`MAX_POLLS=30`), progress bar added |
+| 9 | No admin visibility into personalization sessions | New `PersonalizationOrders.js` page, `/api/admin/personalization/sessions`, `/api/admin/personalization/sessions/{token}/resend-email` |
+
+
 - **TASK 1 — Fix empty spreads**: Auto-generate spread background images from template PDF
   - `generate_template_spread_images()` helper added to `server.py`
   - Priority: storybook images → cached template images → generate from PDF
