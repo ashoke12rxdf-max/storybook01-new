@@ -1,0 +1,1 @@
+"""Automation module for template management and order processing"""

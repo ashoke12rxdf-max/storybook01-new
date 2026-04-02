@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#1C2340" />
+        <meta name="description" content="Storybook Vault - Transform PDFs into magical flipbooks" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600;700&display=swap" rel="stylesheet" />
+        <title>Storybook Vault</title>
+        <style>
+            /* Fallback loading screen in case React fails to load */
+            #root:empty::after {
+                content: 'Loading Storybook Vault...';
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                font-family: 'Inter', system-ui, sans-serif;
+                font-size: 18px;
+                color: #666;
+                background: #F7F1E8;
+            }
+            /* Error fallback */
+            .js-error-fallback {
+                display: none;
+                min-height: 100vh;
+                background: #1C2340;
+                color: white;
+                font-family: 'Inter', system-ui, sans-serif;
+                padding: 40px;
+                text-align: center;
+            }
+            .js-error-fallback h1 { margin-bottom: 16px; }
+            .js-error-fallback p { color: #888; margin-bottom: 24px; }
+            .js-error-fallback button {
+                background: #4dabf7;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 14px;
+            }
+        </style>
+    </head>
+    <body>
+        <noscript>You need to enable JavaScript to run this app.</noscript>
+        <div id="root"></div>
+        
+        <!-- Fallback error display -->
+        <div id="js-error-fallback" class="js-error-fallback">
+            <h1>Something went wrong</h1>
+            <p id="js-error-message">The application failed to load.</p>
+            <button onclick="window.location.reload()">Refresh Page</button>
+        </div>
+        
+        <script>
+            // Global error handler to show fallback UI
+            window.onerror = function(msg, url, lineNo, columnNo, error) {
+                console.error('Global error:', msg, url, lineNo, columnNo, error);
+                var fallback = document.getElementById('js-error-fallback');
+                var message = document.getElementById('js-error-message');
+                var root = document.getElementById('root');
+                if (fallback && root && root.innerHTML.trim() === '') {
+                    fallback.style.display = 'flex';
+                    fallback.style.flexDirection = 'column';
+                    fallback.style.alignItems = 'center';
+                    fallback.style.justifyContent = 'center';
+                    if (message) {
+                        message.textContent = 'Error: ' + msg;
+                    }
+                }
+                return false;
+            };
+        </script>
+    </body>
+</html>
