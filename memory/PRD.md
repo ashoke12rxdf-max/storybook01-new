@@ -106,7 +106,16 @@ REACT_APP_BACKEND_URL=https://your-railway-url.railway.app
 - Cloned from `https://github.com/plannersandjournal0-wq/story-vault-new-feature`
 - Phase 2 completed: Admin Visual Editor (Fabric.js)
 
-## Phase 2 Implementation (April 2, 2026)
+## Phase 2 Enhancement (April 2, 2026 — Session 2)
+
+### New Features Added
+4. **Allow any PDF upload** — removed fillable-fields restriction; plain PDFs now upload successfully
+5. **Upload Modal** — replaced browser `prompt()` dialogs with a proper modal (Title + Slug + Description)
+6. **Field Definitions tab inside SpreadBlockEditor** — "Fields" tab in right panel; create `[dad_name]`, `[son_name]`, etc. without leaving the editor; directly connected to personalization sessions
+7. **Quick Define** — when an undefined `[token]` appears in a block, click "+ Define" to pre-fill and define it instantly in the Fields tab; valid = green, invalid = red
+8. **Full Preview Modal** — "Full Preview" button captures the canvas at 2× resolution with placeholder values applied; shows in a modal with Refresh + Download buttons
+
+
 
 ### Features Added
 1. **SpreadBlockEditor** (`/admin/templates/:templateId/spread-editor`)
