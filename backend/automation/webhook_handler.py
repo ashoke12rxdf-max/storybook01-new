@@ -108,13 +108,21 @@ class WebhookHandler:
                 "requiresPersonalization": True
             }
         
+        # Get customer name from various possible fields
+        customer_name = (
+            webhook_data.get("buyerFullName") or 
+            webhook_data.get("customerName") or 
+            webhook_data.get("buyer_name") or
+            ""
+        )
+        
         # Create personalization session
         result = await self.session_manager.create_session(
             checkout_id=checkout_id,
             order_id=external_order_id,
             external_order_id=external_order_id,
             customer_email=webhook_data.get("customerEmail", ""),
-            customer_name=webhook_data.get("buyerFullName", ""),
+            customer_name=customer_name,
             product_slug=webhook_data.get("productSlug"),
             template=template,
             requested_name=webhook_data.get("requestedName", "")
@@ -127,6 +135,34 @@ class WebhookHandler:
             f"checkout_id={checkout_id}, order_id={external_order_id}, "
             f"email={customer_email}"
         )
+        
+        # Send personalization email
+        if customer_email and not is_simulated:
+            try:
+                from automation.email_sender import EmailSender
+                import os
+                
+                base_url = os.getenv("APP_BASE_URL", "http://localhost:3000").rstrip('/')
+                personalization_url = f"{base_url}/personalize/{session['session_token']}"
+                
+                email_sent = await EmailSender.send_personalization_link_email(
+                    to_email=customer_email,
+                    customer_name=customer_name,
+                    product_title=template.get("title", "Storybook"),
+                    personalization_url=personalization_url,
+                    order_id=external_order_id
+                )
+                
+                if email_sent:
+                    await self.db.personalization_sessions.update_one(
+                        {"session_token": session["session_token"]},
+                        {"$set": {"email_sent": True, "email_sent_at": datetime.now(timezone.utc).isoformat()}}
+                    )
+                    logger.info(f"[EMAIL SENT] Personalization link email sent to {customer_email}")
+                else:
+                    logger.warning(f"[EMAIL FAILED] Could not send personalization email to {customer_email}")
+            except Exception as e:
+                logger.error(f"[EMAIL ERROR] Failed to send personalization email: {str(e)}")
         
         return {
             "received": True,

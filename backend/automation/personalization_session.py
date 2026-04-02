@@ -48,7 +48,7 @@ class PersonalizationSessionManager:
         order_id: str,
         external_order_id: str,
         customer_email: str,
-        customer_name: str,
+        customer_name: Optional[str],
         product_slug: str,
         template: Dict,
         requested_name: str = ""
@@ -112,8 +112,8 @@ class PersonalizationSessionManager:
             order_id=order_id,
             external_order_id=external_order_id,
             customer_email=customer_email,
-            customer_name=customer_name,
-            requested_name=requested_name,
+            customer_name=customer_name or "",  # Handle None
+            requested_name=requested_name or "",
             product_slug=product_slug,
             template_id=template["id"],
             template_snapshot=snapshot,

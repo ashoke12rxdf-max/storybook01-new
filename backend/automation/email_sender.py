@@ -12,6 +12,154 @@ class EmailSender:
     """Handles email delivery for storybook orders"""
     
     @staticmethod
+    async def send_personalization_link_email(
+        to_email: str,
+        customer_name: str,
+        product_title: str,
+        personalization_url: str,
+        order_id: str = ""
+    ) -> bool:
+        """
+        Send email with personalization form link after successful payment.
+        
+        Args:
+            to_email: Customer's email address
+            customer_name: Customer's name (if available)
+            product_title: Title of the storybook product
+            personalization_url: Full URL to the personalization form
+            order_id: Order ID for logging
+            
+        Returns:
+            True if email sent successfully, False otherwise
+        """
+        try:
+            email_from = os.getenv("FROM_EMAIL")
+            if not email_from:
+                logger.warning("FROM_EMAIL not configured")
+                return False
+            
+            display_name = customer_name or "Friend"
+            
+            html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complete Your Storybook Personalization</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: linear-gradient(135deg, #f5f0ff 0%, #fff0f5 100%); line-height: 1.6;">
+    
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0; padding: 40px 20px;">
+        <tr>
+            <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background: white; border-radius: 20px; box-shadow: 0 10px 40px rgba(107, 70, 193, 0.1); overflow: hidden;">
+                    
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #9333ea 0%, #db2777 100%); padding: 40px 40px 50px 40px; text-align: center;">
+                            <h1 style="margin: 0; color: white; font-size: 28px; font-weight: 700;">
+                                Storybook Vault
+                            </h1>
+                        </td>
+                    </tr>
+                    
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 50px 40px;">
+                            
+                            <h2 style="margin: 0 0 20px 0; color: #1f2937; font-size: 24px; font-weight: 700;">
+                                Thank you for your order!
+                            </h2>
+                            
+                            <p style="margin: 0 0 25px 0; color: #4b5563; font-size: 16px; line-height: 1.7;">
+                                Hi {display_name}, your payment was successful! Now it's time to personalize your storybook.
+                            </p>
+                            
+                            <!-- Product Box -->
+                            <div style="background: linear-gradient(135deg, #faf5ff 0%, #fef2f8 100%); border-radius: 12px; padding: 25px; margin: 30px 0; border-left: 4px solid #9333ea;">
+                                <p style="margin: 0 0 8px 0; color: #6b7280; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">
+                                    Your Storybook
+                                </p>
+                                <p style="margin: 0; color: #1f2937; font-size: 20px; font-weight: 700;">
+                                    {product_title}
+                                </p>
+                            </div>
+                            
+                            <p style="margin: 0 0 25px 0; color: #4b5563; font-size: 16px; line-height: 1.7;">
+                                Click the button below to fill in the personalization details. This link is unique to your order and can only be used once.
+                            </p>
+                            
+                            <!-- CTA Button -->
+                            <table width="100%" cellpadding="0" cellspacing="0" style="margin: 35px 0;">
+                                <tr>
+                                    <td align="center">
+                                        <a href="{personalization_url}" 
+                                           style="display: inline-block; background: linear-gradient(135deg, #9333ea 0%, #db2777 100%); color: white; text-decoration: none; padding: 18px 45px; border-radius: 50px; font-size: 18px; font-weight: 600; box-shadow: 0 4px 15px rgba(147, 51, 234, 0.4);">
+                                            Personalize My Storybook
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <p style="margin: 0; color: #9ca3af; font-size: 14px; text-align: center;">
+                                If the button doesn't work, copy this link:<br>
+                                <a href="{personalization_url}" style="color: #9333ea; word-break: break-all;">{personalization_url}</a>
+                            </p>
+                            
+                        </td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background: #f9fafb; padding: 25px 40px; text-align: center; border-top: 1px solid #e5e7eb;">
+                            <p style="margin: 0; color: #9ca3af; font-size: 13px;">
+                                Made with love by Storybook Vault
+                            </p>
+                        </td>
+                    </tr>
+                    
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+            
+            text_content = f"""
+Thank you for your order!
+
+Hi {display_name}, your payment was successful!
+
+Now it's time to personalize your storybook: {product_title}
+
+Click here to fill in the personalization details:
+{personalization_url}
+
+This link is unique to your order and can only be used once.
+
+---
+Made with love by Storybook Vault
+"""
+            
+            params = {
+                "from": f"Storybook Vault <{email_from}>",
+                "to": [to_email],
+                "subject": f"Complete your storybook personalization - {product_title}",
+                "html": html_content,
+                "text": text_content,
+            }
+            
+            email = resend.Emails.send(params)
+            logger.info(f"Personalization link email sent to {to_email}: {email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send personalization link email to {to_email}: {str(e)}")
+            return False
+    
+    @staticmethod
     async def send_storybook_delivery_email(
         to_email: str,
         customer_name: str,
