@@ -27,79 +27,60 @@ Fix and complete the full personalization flow for Storybook Vault so that templ
 
 ## What's Been Implemented (Jan 2026)
 
+### Bug Fixes (Latest)
+- [x] Fixed: `customer_name` was None from Polar webhook causing Pydantic validation error
+- [x] Fixed: Now handles None/missing customer_name gracefully with empty string default
+- [x] Added: `send_personalization_link_email()` function for immediate email after payment
+- [x] Added: Webhook now sends personalization email automatically for real (non-simulated) orders
+- [x] Added: Email sent tracking (`email_sent`, `email_sent_at` fields on session)
+
 ### Backend Improvements
 - [x] System password field injection in `personalization_session.py`
 - [x] Session status polling endpoint (`/api/personalization/session/{token}/status`)
 - [x] Delivery email tracking (`delivery_email_sent`, `delivery_email_sent_at`)
 - [x] Password extraction from `view_password` field for storybook protection
 - [x] Idempotent session creation on webhook retries
+- [x] Personalization link email template with branded design
 
 ### Frontend Improvements
-- [x] **PersonalizationForm.js**: Complete rewrite with:
-  - Post-submit polling for generation status
-  - "Optional Settings" section for system password field
-  - Empty field definitions error state
-  - Generation progress indicator
-  - Final "View Your Storybook" link display
-  
+- [x] **PersonalizationForm.js**: Complete rewrite with post-submit polling
 - [x] **PersonalizationSuccess.js**: Polling with timeout and email fallback
-
-- [x] **TemplateManagement.js**: 
-  - Live form preview panel
-  - Field usage validation warnings
-  - System password field preview
-
-- [x] **SpreadBlockEditor.js**:
-  - Token insertion chips for quick placeholder insertion
-  - Field definition quick-define from undefined tokens
-
-- [x] **PersonalizationOrders.js**:
-  - Enhanced status tracking (ready, submitted, processing, completed, failed, expired)
-  - Delivery email sent indicator
-  - Error message display
-  - Session token display
+- [x] **TemplateManagement.js**: Live form preview panel and field validation
+- [x] **SpreadBlockEditor.js**: Token insertion chips for quick placeholder insertion
+- [x] **PersonalizationOrders.js**: Enhanced status tracking with email indicators
 
 ### Environment Configuration
 - [x] RESEND_API_KEY configured
-- [x] FROM_EMAIL configured  
-- [x] APP_BASE_URL configured
+- [x] FROM_EMAIL: orders@keepsakegifts.store
+- [x] APP_BASE_URL: https://personalize-pdf.preview.emergentagent.com
 - [x] POLAR_WEBHOOK_SECRET configured
 
 ---
 
-## Prioritized Backlog
+## Templates Available
+1. **Baby Boy Adventure** (baby-boy-adventure) - 4 fields
+2. **Storybook** (storybook) - 1 field
 
-### P0 - Critical (Done)
-- [x] System password field injection
-- [x] Session creation on webhook
-- [x] Success page polling
-- [x] Form rendering with all fields
-- [x] Post-submit generation polling
+---
 
-### P1 - High Priority
-- [ ] Real Polar integration testing (currently using simulation)
-- [ ] Email delivery verification with real customer flow
-- [ ] PDF generation with actual base PDF uploads
+## Email Templates
 
-### P2 - Medium Priority
-- [ ] "Create missing fields from placeholders" helper in Spread Editor
-- [ ] Bulk operations in Personalization Orders
-- [ ] Session retry/regenerate functionality
-- [ ] Export sessions to CSV
+### 1. Personalization Link Email
+- Sent immediately after Polar payment webhook
+- Contains: Product title, unique personalization form link
+- Subject: "Complete your storybook personalization - {product_title}"
 
-### P3 - Nice to Have
-- [ ] Custom email templates
-- [ ] Analytics dashboard for conversion tracking
-- [ ] Multiple storybook delivery formats
-- [ ] Customer account portal
+### 2. Storybook Delivery Email  
+- Sent after storybook generation completes
+- Contains: Storybook title, view URL, password (if set)
+- Subject: "Your personalized storybook is ready!"
 
 ---
 
 ## Next Tasks
-1. Test real Polar webhook flow (not simulation)
-2. Upload actual PDF template and test generation
-3. Verify email delivery end-to-end
-4. Add more field types (checkbox, radio, etc.)
+1. Monitor real Polar webhooks for any edge cases
+2. Test full generation flow with actual PDF uploads
+3. Add more field types if needed
 
 ---
 
@@ -107,12 +88,8 @@ Fix and complete the full personalization flow for Storybook Vault so that templ
 
 ### Personalization Flow
 - `POST /api/automation/simulate-polar-webhook` - Test webhook
+- `POST /api/webhooks/polar` - Real Polar webhook endpoint
 - `GET /api/personalization/by-checkout?checkout_id=xxx` - Session lookup
 - `GET /api/personalization/session/{token}` - Session data
 - `GET /api/personalization/session/{token}/status` - Status polling
 - `POST /api/personalization/session/{token}/submit` - Form submission
-
-### Admin
-- `GET /api/admin/personalization/sessions` - List all sessions
-- `POST /api/admin/personalization/sessions/{token}/resend-email` - Resend email
-- `GET /api/admin/templates/{id}/spreads` - Get template spreads
