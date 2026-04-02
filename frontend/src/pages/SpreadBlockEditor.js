@@ -772,6 +772,7 @@ function BlockConfigPanel({ block, fieldDefs, availableFonts, onUpdate, onFontSe
             Text Template
           </label>
           <textarea
+            id="text-template-textarea"
             value={block.text_template || ''}
             onChange={e => onUpdate('text_template', e.target.value)}
             rows={3}
@@ -780,6 +781,43 @@ function BlockConfigPanel({ block, fieldDefs, availableFonts, onUpdate, onFontSe
             data-testid="text-template-input"
           />
           <p className="text-xs text-gray-400 mt-1">Use [field_key] for personalization values</p>
+          
+          {/* Quick insert field tokens */}
+          {fieldDefs.length > 0 && (
+            <div className="mt-2">
+              <p className="text-xs text-gray-500 mb-1">Click to insert:</p>
+              <div className="flex flex-wrap gap-1">
+                {fieldDefs.map(f => (
+                  <button
+                    key={f.field_key}
+                    onClick={() => {
+                      const textarea = document.getElementById('text-template-textarea');
+                      if (textarea) {
+                        const start = textarea.selectionStart;
+                        const end = textarea.selectionEnd;
+                        const currentText = block.text_template || '';
+                        const token = `[${f.field_key}]`;
+                        const newText = currentText.substring(0, start) + token + currentText.substring(end);
+                        onUpdate('text_template', newText);
+                        // Restore cursor position after token
+                        setTimeout(() => {
+                          textarea.focus();
+                          textarea.setSelectionRange(start + token.length, start + token.length);
+                        }, 0);
+                      } else {
+                        onUpdate('text_template', (block.text_template || '') + `[${f.field_key}]`);
+                      }
+                    }}
+                    className="px-2 py-0.5 text-xs bg-purple-50 text-purple-700 hover:bg-purple-100 rounded font-mono border border-purple-200 transition-colors"
+                    title={`Insert [${f.field_key}] - ${f.label}`}
+                    data-testid={`insert-token-${f.field_key}`}
+                  >
+                    [{f.field_key}]
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Token Validation */}

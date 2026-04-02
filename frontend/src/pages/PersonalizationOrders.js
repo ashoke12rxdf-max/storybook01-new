@@ -7,9 +7,10 @@ const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 const STATUS_CONFIG = {
   ready:      { color: 'bg-blue-100 text-blue-700',   icon: Clock,         label: 'Waiting for customer' },
   submitted:  { color: 'bg-yellow-100 text-yellow-700', icon: Clock,       label: 'Processing' },
+  processing: { color: 'bg-purple-100 text-purple-700', icon: RefreshCw,   label: 'Generating' },
   completed:  { color: 'bg-green-100 text-green-700',  icon: CheckCircle,  label: 'Completed' },
-  expired:    { color: 'bg-red-100 text-red-700',      icon: AlertCircle,  label: 'Expired' },
-  processing: { color: 'bg-purple-100 text-purple-700', icon: RefreshCw,   label: 'Processing' },
+  failed:     { color: 'bg-red-100 text-red-700',      icon: AlertCircle,  label: 'Failed' },
+  expired:    { color: 'bg-gray-100 text-gray-600',    icon: AlertCircle,  label: 'Expired' },
 };
 
 export default function PersonalizationOrders() {
@@ -81,7 +82,7 @@ export default function PersonalizationOrders() {
 
       {/* Filters */}
       <div className="flex gap-2 mb-4 flex-wrap">
-        {['all', 'ready', 'submitted', 'completed', 'expired'].map(f => (
+        {['all', 'ready', 'submitted', 'processing', 'completed', 'failed', 'expired'].map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -123,14 +124,19 @@ export default function PersonalizationOrders() {
                 <div className="flex items-start justify-between gap-4 flex-wrap">
                   {/* Left: customer + template */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}>
                         <StatusIcon size={11} />
                         {cfg.label}
                       </span>
                       {session.email_sent && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-600">
-                          <Mail size={10} /> Email sent
+                          <Mail size={10} /> Link email sent
+                        </span>
+                      )}
+                      {session.delivery_email_sent && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-50 text-green-600">
+                          <CheckCircle size={10} /> Delivered
                         </span>
                       )}
                     </div>
@@ -141,8 +147,13 @@ export default function PersonalizationOrders() {
                       {session.template_snapshot?.title || 'Unknown template'} · {created}
                     </p>
                     <p className="text-xs text-gray-400 font-mono mt-0.5">
-                      checkout: {session.checkout_id || '—'}
+                      checkout: {session.checkout_id || '—'} | token: {session.session_token?.slice(0, 12)}...
                     </p>
+                    {session.error_message && (
+                      <p className="text-xs text-red-500 mt-1 bg-red-50 px-2 py-1 rounded">
+                        Error: {session.error_message}
+                      </p>
+                    )}
                   </div>
 
                   {/* Right: actions */}
