@@ -27,10 +27,10 @@ class SpreadBlock(BaseModel):
     spread_id: int                    # Which spread (0-indexed)
     block_id: str                     # Unique block identifier
     type: str = "text"                # text | image
-    x: float = 0                      # X position in pixels
-    y: float = 0                      # Y position in pixels
-    width: float = 200                # Width in pixels
-    height: float = 50                # Height in pixels
+    x: float = 0                      # X position in image-pixel space
+    y: float = 0                      # Y position in image-pixel space
+    width: float = 200                # Width in image-pixel space
+    height: float = 50                # Height in image-pixel space
     text_template: str = ""           # e.g., "From [dad_name] to [son_name]"
     allowed_fields: List[str] = []    # Fields this block uses
     font_family: str = "Helvetica"
@@ -43,6 +43,8 @@ class SpreadBlock(BaseModel):
     overflow_behavior: str = "shrink" # truncate | shrink | wrap
     rotation: float = 0
     z_index: int = 1
+    letter_spacing: float = 0.0       # Character spacing in pt (0 = default)
+    line_height: float = 1.2          # Line height multiplier (default 1.2)
 
 
 # =============================================================================
