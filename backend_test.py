@@ -76,7 +76,7 @@ class BackendTester:
     def test_simulate_polar_webhook(self):
         """Test: Simulated Polar webhook creates personalization session with injected password field"""
         payload = {
-            "productSlug": "baby-boy-story",  # Use a known template
+            "productSlug": "baby-boy-adventure",  # Use the active template
             "customerEmail": "test@example.com",
             "customerName": "Test User",
             "requestedName": "TestChild"
