@@ -12,6 +12,10 @@ import { toast } from 'sonner';
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 const CANVAS_MAX_WIDTH = 780;
 const FIELD_TYPES = ['text', 'textarea', 'image', 'date', 'select'];
+const SYSTEM_FONTS = [
+  'Helvetica', 'Arial', 'Times New Roman', 'Courier New', 'Georgia',
+  'Verdana', 'Trebuchet MS', 'Impact', 'Garamond', 'Palatino Linotype',
+];
 
 const genId = () => `blk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
@@ -30,6 +34,9 @@ function SpreadBlockEditor() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [canvasReady, setCanvasReady] = useState(false);
+
+  // Custom fonts from assets library
+  const [availableFonts, setAvailableFonts] = useState([]);
 
   // Right panel
   const [rightTab, setRightTab] = useState('block'); // 'block' | 'fields'
@@ -121,6 +128,36 @@ function SpreadBlockEditor() {
     load();
   }, [templateId]);
 
+  // ── Load Custom Fonts ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const loadFonts = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/assets/fonts`);
+        const data = await res.json();
+        const fonts = data.fonts || [];
+
+        // Register each font so Fabric.js canvas can render it
+        await Promise.all(fonts.map(async (font) => {
+          try {
+            const ff = new FontFace(font.name, `url(${API_URL}${font.publicUrl})`);
+            const loaded = await ff.load();
+            document.fonts.add(loaded);
+          } catch (e) {
+            console.warn(`Font load failed: ${font.name}`, e);
+          }
+        }));
+
+        setAvailableFonts(fonts);
+
+        // Re-render canvas once fonts are ready (so custom-font blocks display correctly)
+        if (fabricRef.current) fabricRef.current.requestRenderAll();
+      } catch (e) {
+        console.warn('Failed to fetch custom fonts:', e);
+      }
+    };
+    loadFonts();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Preview text helper ──────────────────────────────────────────────────────
   const applyPreviewText = useCallback((tmpl = '') =>
     tmpl.replace(/\[(\w+)\]/g, (_, key) => {
@@ -152,6 +189,8 @@ function SpreadBlockEditor() {
         fill: block.color || '#000000',
         textAlign: block.alignment || 'left',
         angle: block.rotation || 0,
+        charSpacing: block.letter_spacing || 0,
+        lineHeight: block.line_height || 1.2,
         editable: false,
         borderColor: '#7c3aed',
         cornerColor: '#7c3aed',
@@ -226,7 +265,9 @@ function SpreadBlockEditor() {
       text_template: 'Enter text or use [field_key]',
       font_family: 'Helvetica', font_size: 24,
       font_weight: 'normal', italic: false,
+      font_id: null, font_url: null,
       color: '#000000', alignment: 'center',
+      letter_spacing: 0, line_height: 1.2,
       max_lines: 2, overflow_behavior: 'shrink',
       rotation: 0, z_index: 1, allowed_fields: [],
     };
@@ -235,7 +276,10 @@ function SpreadBlockEditor() {
       width: block.width * s,
       fontSize: Math.round(block.font_size * s),
       fontFamily: block.font_family, fill: block.color,
-      textAlign: block.alignment, editable: false,
+      textAlign: block.alignment,
+      charSpacing: block.letter_spacing,
+      lineHeight: block.line_height,
+      editable: false,
       borderColor: '#7c3aed', cornerColor: '#7c3aed',
       cornerSize: 8, transparentCorners: false,
       data: block,
@@ -276,11 +320,29 @@ function SpreadBlockEditor() {
       case 'italic': active.set('fontStyle', value ? 'italic' : 'normal'); break;
       case 'color': active.set('fill', value); break;
       case 'alignment': active.set('textAlign', value); break;
+      case 'letter_spacing': active.set('charSpacing', Number(value) || 0); break;
+      case 'line_height': active.set('lineHeight', Math.max(0.5, Number(value) || 1.2)); break;
       default: break;
     }
     active.data = { ...active.data, [field]: value };
     canvas.renderAll();
     setSelectedBlockData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // ── Update Font Selection (sets font_family + font_id + font_url atomically) ─
+  const updateFontSelection = (fontData) => {
+    const canvas = fabricRef.current;
+    const active = canvas?.getActiveObject();
+    if (!active?.data) return;
+    active.set('fontFamily', fontData.font_family);
+    const updates = {
+      font_family: fontData.font_family,
+      font_id: fontData.font_id || null,
+      font_url: fontData.font_url || null,
+    };
+    active.data = { ...active.data, ...updates };
+    canvas.renderAll();
+    setSelectedBlockData(prev => ({ ...prev, ...updates }));
   };
 
   // ── Save Field Definitions ───────────────────────────────────────────────────
@@ -317,11 +379,15 @@ function SpreadBlockEditor() {
         height: Math.round((obj.height * (obj.scaleY || 1)) / s),
         text_template: obj.data.text_template || obj.text || '',
         font_family: obj.fontFamily || 'Helvetica',
+        font_id: obj.data.font_id || null,
+        font_url: obj.data.font_url || null,
         font_size: Math.round((obj.fontSize || 24) / s),
         font_weight: obj.fontWeight || 'normal',
         italic: obj.fontStyle === 'italic',
         color: obj.fill || '#000000',
         alignment: obj.textAlign || 'left',
+        letter_spacing: obj.charSpacing || 0,
+        line_height: obj.lineHeight || 1.2,
         max_lines: obj.data.max_lines || 1,
         overflow_behavior: obj.data.overflow_behavior || 'shrink',
         rotation: Math.round(obj.angle || 0),
@@ -609,7 +675,9 @@ function SpreadBlockEditor() {
                 <BlockConfigPanel
                   block={selectedBlockData}
                   fieldDefs={fieldDefs}
+                  availableFonts={availableFonts}
                   onUpdate={updateBlockProp}
+                  onFontSelect={updateFontSelection}
                   onDelete={deleteSelected}
                   onQuickDefine={handleQuickDefine}
                   getTokensInText={getTokensInText}
@@ -679,8 +747,20 @@ function EmptyBlockState({ fieldDefs, onSwitchToFields }) {
 }
 
 // ── Block Config Panel ─────────────────────────────────────────────────────────
-function BlockConfigPanel({ block, fieldDefs, onUpdate, onDelete, onQuickDefine, getTokensInText, isValidToken }) {
+function BlockConfigPanel({ block, fieldDefs, availableFonts, onUpdate, onFontSelect, onDelete, onQuickDefine, getTokensInText, isValidToken }) {
   const tokens = getTokensInText(block.text_template || '');
+
+  // Build unified font option list: system + custom uploads
+  const fontOptions = [
+    ...SYSTEM_FONTS.map(f => ({ label: f, font_family: f, font_id: null, font_url: null, isCustom: false })),
+    ...availableFonts.map(f => ({ label: f.name, font_family: f.name, font_id: f.id, font_url: f.publicUrl, isCustom: true })),
+  ];
+  const currentFontFamily = block.font_family || 'Helvetica';
+
+  const handleFontChange = (e) => {
+    const selected = fontOptions.find(o => o.font_family === e.target.value);
+    if (selected) onFontSelect(selected);
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -736,17 +816,34 @@ function BlockConfigPanel({ block, fieldDefs, onUpdate, onDelete, onQuickDefine,
           </div>
         )}
 
-        {/* Font Family */}
+        {/* Font Family — dropdown merging system + custom fonts */}
         <div>
           <label className="block text-xs font-semibold text-gray-600 mb-1.5">Font Family</label>
-          <input
-            type="text"
-            value={block.font_family || 'Helvetica'}
-            onChange={e => onUpdate('font_family', e.target.value)}
-            placeholder="Helvetica"
-            className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500"
-            data-testid="font-family-input"
-          />
+          <select
+            value={currentFontFamily}
+            onChange={handleFontChange}
+            className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white"
+            data-testid="font-family-select"
+            style={{ fontFamily: currentFontFamily }}
+          >
+            <optgroup label="System Fonts">
+              {SYSTEM_FONTS.map(f => (
+                <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>
+              ))}
+            </optgroup>
+            {availableFonts.length > 0 && (
+              <optgroup label="Uploaded Fonts">
+                {availableFonts.map(f => (
+                  <option key={f.id} value={f.name} style={{ fontFamily: f.name }}>{f.name}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+          {block.font_id && (
+            <p className="text-xs text-purple-600 mt-0.5 flex items-center gap-1">
+              <Type size={10} /> Custom font active
+            </p>
+          )}
         </div>
 
         {/* Font Size + Style */}
@@ -781,6 +878,38 @@ function BlockConfigPanel({ block, fieldDefs, onUpdate, onDelete, onQuickDefine,
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+
+        {/* Letter Spacing + Line Height */}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+              Letter Spacing
+            </label>
+            <input
+              type="number"
+              value={block.letter_spacing ?? 0}
+              onChange={e => onUpdate('letter_spacing', Number(e.target.value))}
+              min={-200} max={800} step={10}
+              className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500"
+              data-testid="letter-spacing-input"
+            />
+            <p className="text-xs text-gray-400 mt-0.5">‰ of font size</p>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+              Line Height
+            </label>
+            <input
+              type="number"
+              value={block.line_height ?? 1.2}
+              onChange={e => onUpdate('line_height', Number(e.target.value))}
+              min={0.5} max={4.0} step={0.1}
+              className="w-full text-sm px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500"
+              data-testid="line-height-input"
+            />
+            <p className="text-xs text-gray-400 mt-0.5">multiplier</p>
           </div>
         </div>
 

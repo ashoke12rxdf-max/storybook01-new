@@ -62,11 +62,13 @@ SPREADS_DIR = ROOT_DIR / "spreads"
 TEMPLATES_DIR = ROOT_DIR / "templates"
 PERSONALIZED_DIR = ROOT_DIR / "personalized"
 SESSION_UPLOADS_DIR = ROOT_DIR / "uploads" / "sessions"
+TEMPLATE_SPREADS_DIR = ROOT_DIR / "spreads" / "templates"
 UPLOAD_DIR.mkdir(exist_ok=True)
 SPREADS_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR.mkdir(exist_ok=True)
 PERSONALIZED_DIR.mkdir(exist_ok=True)
 SESSION_UPLOADS_DIR.mkdir(exist_ok=True, parents=True)
+TEMPLATE_SPREADS_DIR.mkdir(exist_ok=True, parents=True)
 
 # Max image upload size (5MB)
 MAX_IMAGE_UPLOAD_SIZE = 5 * 1024 * 1024
@@ -249,6 +251,52 @@ async def convert_pdf_to_spreads(pdf_path: str, storybook_id: str) -> tuple:
     except Exception as e:
         logger.error(f"Error converting PDF: {e}")
         raise HTTPException(status_code=500, detail=f"PDF conversion failed: {str(e)}")
+
+
+async def generate_template_spread_images(template_id: str, pdf_path: str, orientation: str) -> List[Dict]:
+    """
+    Generate and cache spread images from a template PDF.
+    Returns list of {spread_id, image_url, image_width, image_height}.
+    Uses the same rendering parameters as convert_pdf_to_spreads for coordinate parity.
+    """
+    try:
+        template_dir = TEMPLATE_SPREADS_DIR / template_id
+        template_dir.mkdir(exist_ok=True)
+
+        doc = fitz.open(pdf_path)
+        spreads = []
+        zoom = 1.5
+        max_width = 1920 if orientation == "landscape" else 1080
+
+        for page_num in range(len(doc)):
+            out_path = template_dir / f"spread_{page_num}.webp"
+
+            page = doc[page_num]
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            if img.width > max_width:
+                ratio = max_width / img.width
+                new_height = int(img.height * ratio)
+                img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+
+            img.save(out_path, "WEBP", quality=85)
+
+            spreads.append({
+                "spread_id": page_num,
+                "image_url": f"/api/template-spreads/{template_id}/spread_{page_num}.webp",
+                "image_width": img.width,
+                "image_height": img.height,
+            })
+
+        doc.close()
+        logger.info(f"Generated {len(spreads)} spread images for template {template_id}")
+        return spreads
+
+    except Exception as e:
+        logger.error(f"Error generating template spread images for {template_id}: {e}")
+        raise
 
 
 # ============================================================================
@@ -682,47 +730,95 @@ async def get_template_pdf(template_id: str):
 
 @api_router.get("/admin/templates/{template_id}/spreads")
 async def get_template_spreads(template_id: str):
-    """Get all spreads for a template with their block configs"""
+    """
+    Get all spreads for a template with their block configs and background images.
+    Priority for spread images:
+      1. Existing storybook spreads (matching productSlug) — reuses existing pipeline
+      2. Cached template-specific spread images in TEMPLATE_SPREADS_DIR
+      3. Auto-generated from template PDF (cached for subsequent calls)
+    """
     try:
         template = await db.templates.find_one({"id": template_id}, {"_id": 0})
         if not template:
             raise HTTPException(status_code=404, detail="Template not found")
-        
-        # Find storybook with spreads for this template (by productSlug)
-        storybook = await db.storybooks.find_one(
-            {"productSlug": template.get("productSlug")},
-            {"spreads": 1, "spreadCount": 1, "orientation": 1}
-        )
-        
-        # Build spreads list with block data
-        spreads = []
+
         spread_count = template.get("pageCount", 0)
         spread_blocks = template.get("spread_blocks", [])
-        
+        orientation = template.get("orientation", "landscape")
+
+        # --- Step 1: Try existing storybook spreads (productSlug match) ---
+        storybook_spreads: List[str] = []
+        storybook = await db.storybooks.find_one(
+            {"productSlug": template.get("productSlug")},
+            {"spreads": 1}
+        )
+        if storybook and storybook.get("spreads"):
+            storybook_spreads = storybook["spreads"]
+
+        # --- Step 2: Build per-page image info ---
+        spread_image_info: List[Dict] = []
         for i in range(spread_count):
-            # Get blocks for this spread
+            if i < len(storybook_spreads):
+                # Reuse existing storybook spread image
+                spread_image_info.append({
+                    "spread_id": i,
+                    "image_url": storybook_spreads[i],
+                    "image_width": None,
+                    "image_height": None,
+                })
+            else:
+                # Check template-specific cache
+                cached = TEMPLATE_SPREADS_DIR / template_id / f"spread_{i}.webp"
+                if cached.exists():
+                    spread_image_info.append({
+                        "spread_id": i,
+                        "image_url": f"/api/template-spreads/{template_id}/spread_{i}.webp",
+                        "image_width": None,
+                        "image_height": None,
+                    })
+                else:
+                    spread_image_info.append({
+                        "spread_id": i,
+                        "image_url": None,
+                        "image_width": None,
+                        "image_height": None,
+                    })
+
+        # --- Step 3: Generate missing images from template PDF ---
+        has_missing = any(s["image_url"] is None for s in spread_image_info)
+        pdf_path = template.get("basePdfPath", "")
+        if has_missing and pdf_path and Path(pdf_path).exists():
+            generated = await generate_template_spread_images(template_id, pdf_path, orientation)
+            gen_map = {g["spread_id"]: g for g in generated}
+            for s in spread_image_info:
+                if s["image_url"] is None and s["spread_id"] in gen_map:
+                    g = gen_map[s["spread_id"]]
+                    s["image_url"] = g["image_url"]
+                    s["image_width"] = g["image_width"]
+                    s["image_height"] = g["image_height"]
+
+        # --- Step 4: Assemble final spreads payload ---
+        spreads = []
+        for info in spread_image_info:
+            i = info["spread_id"]
             blocks_for_spread = [b for b in spread_blocks if b.get("spread_id") == i]
-            
-            # Get spread image URL if storybook exists
-            spread_image_url = None
-            if storybook and storybook.get("spreads") and i < len(storybook["spreads"]):
-                spread_image_url = storybook["spreads"][i]
-            
             spreads.append({
                 "spread_id": i,
-                "spread_image_url": spread_image_url,
-                "blocks": blocks_for_spread
+                "spread_image_url": info.get("image_url"),
+                "image_width": info.get("image_width"),
+                "image_height": info.get("image_height"),
+                "blocks": blocks_for_spread,
             })
-        
+
         return {
             "template_id": template_id,
             "title": template.get("title"),
-            "orientation": template.get("orientation"),
+            "orientation": orientation,
             "page_count": spread_count,
             "spreads": spreads,
-            "field_definitions": template.get("field_definitions", [])
+            "field_definitions": template.get("field_definitions", []),
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -2206,6 +2302,21 @@ async def check_review_submitted(storybook_id: str, session_id: str):
     except Exception as e:
         logger.error(f"Review check failed: {str(e)}")
         return {"submitted": False}
+
+
+@api_router.get("/template-spreads/{template_id}/{filename}")
+async def get_template_spread_image(template_id: str, filename: str):
+    """Serve cached template spread images generated from the template PDF"""
+    file_path = TEMPLATE_SPREADS_DIR / template_id / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Template spread image not found")
+    ext = Path(filename).suffix.lower()
+    media_type = "image/webp" if ext == ".webp" else "image/jpeg"
+    return FileResponse(
+        file_path,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 # Mount router (no prefix needed, already set in APIRouter)
