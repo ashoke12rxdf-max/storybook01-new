@@ -843,6 +843,7 @@ const CustomerViewer = () => {
                   onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
                   placeholder="Enter password"
                   className="bg-white/50 border-magical-ink/10 focus:border-magical-rose rounded-lg"
+                  data-testid="password-input"
                 />
               </div>
 
@@ -850,6 +851,7 @@ const CustomerViewer = () => {
                 onClick={handlePasswordSubmit}
                 disabled={verifying || !password}
                 className="w-full bg-magical-ink text-magical-cream hover:bg-magical-plum transition-all shadow-lg px-6 py-5 sm:px-8 sm:py-6 rounded-full font-serif"
+                data-testid="enter-storybook-btn"
               >
                 {verifying ? 'Verifying...' : 'Enter Storybook'}
               </Button>

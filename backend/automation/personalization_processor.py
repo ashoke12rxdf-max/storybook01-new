@@ -412,23 +412,21 @@ class PersonalizationProcessor:
         snapshot = session.get("template_snapshot", {})
         personalization_data = session.get("personalization_data", {})
         
-        # Build title using personalization data
-        template_title = snapshot.get("title", "Storybook")
+        # Use template title directly (no name prefix)
+        storybook_title = snapshot.get("title", "Storybook")
         
-        # Try to get a name field for the title
-        name_for_title = ""
+        # Get customer name for metadata (not for title)
+        customer_name = ""
         for field_key in ["child_name", "son_name", "daughter_name", "baby_name", "name", "requested_name"]:
             if field_key in personalization_data:
                 val = personalization_data[field_key]
                 if isinstance(val, str) and val.strip():
-                    name_for_title = val.strip()
+                    customer_name = val.strip()
                     break
         
         # Fallback to legacy requested_name
-        if not name_for_title:
-            name_for_title = session.get("requested_name", "Friend")
-        
-        storybook_title = f"{name_for_title}'s {template_title}"
+        if not customer_name:
+            customer_name = session.get("requested_name", "")
         
         # Get password from view_password field (built-in system field) or legacy password field
         password = personalization_data.get("view_password") or personalization_data.get("password")
@@ -440,7 +438,7 @@ class PersonalizationProcessor:
         flipbook_data = await convert_func(
             pdf_path=pdf_path,
             title=storybook_title,
-            customer_name=name_for_title,
+            customer_name=customer_name,
             password=password,
             styling_defaults=styling_defaults
         )
