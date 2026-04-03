@@ -815,6 +815,9 @@ const CustomerViewer = () => {
   }
 
   if (requiresPassword && !authenticated) {
+    // Get storybook title with fallback
+    const displayTitle = storybook.title?.trim() || 'Your Storybook';
+    
     return (
       <div className="min-h-screen bg-magical-ink flex items-center justify-center p-4">
         <div className="w-full max-w-md">
@@ -823,14 +826,9 @@ const CustomerViewer = () => {
               <div className="inline-flex items-center justify-center w-16 h-16 bg-magical-ink rounded-full mb-4">
                 <Lock className="w-8 h-8 text-magical-gold" />
               </div>
-              <h2 className="text-2xl sm:text-3xl font-serif text-magical-ink mb-2">
-                {storybook.title}
+              <h2 className="text-2xl sm:text-3xl font-serif text-magical-ink mb-3">
+                {displayTitle}
               </h2>
-              {storybook.subtitle && (
-                <p className="text-magical-plum font-sans text-sm">
-                  {storybook.subtitle}
-                </p>
-              )}
             </div>
 
             <div className="space-y-4">

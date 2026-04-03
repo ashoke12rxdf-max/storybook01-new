@@ -91,8 +91,9 @@ class PersonalizationProcessor:
                 customer_view_url=flipbook_data["customerViewUrl"]
             )
             
-            # Step 4: Send delivery email
-            await self._send_delivery_email(session, flipbook_data)
+            # Step 4: Skip delivery email - link is shown on success page instead
+            # await self._send_delivery_email(session, flipbook_data)
+            logger.info(f"Delivery email skipped - link shown on success page")
             
             # Step 5: Cleanup personalized PDF
             await self._cleanup_pdf(personalized_pdf_path)

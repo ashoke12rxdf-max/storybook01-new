@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Loader2, CheckCircle, AlertCircle, Upload, X, Image as ImageIcon,
-  Lock, Send, BookOpen, Eye, EyeOff, ExternalLink
+  Lock, Send, BookOpen, Eye, EyeOff, ExternalLink, Copy, Key
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -11,6 +11,10 @@ const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 // Polling constants for post-submit status check
 const STATUS_POLL_INTERVAL_MS = 2000;
 const STATUS_MAX_POLLS = 60; // 2 minutes max
+
+// Brand
+const BRAND_NAME = "Keepsake Gifts";
+const SUPPORT_EMAIL = "orchidsplanner@gmail.com";
 
 function PersonalizationForm() {
   const { token } = useParams();
@@ -29,6 +33,9 @@ function PersonalizationForm() {
   const [isPollingStatus, setIsPollingStatus] = useState(false);
   const [generationComplete, setGenerationComplete] = useState(false);
   const [finalViewUrl, setFinalViewUrl] = useState(null);
+  
+  // Store submitted data for success page display
+  const [submittedData, setSubmittedData] = useState(null);
   
   // Load session data
   useEffect(() => {
@@ -54,11 +61,16 @@ function PersonalizationForm() {
         if (data.status === 'completed' && data.customer_view_url) {
           setGenerationComplete(true);
           setFinalViewUrl(data.customer_view_url);
+          // Store the personalization data for display
+          if (data.personalization_data) {
+            setSubmittedData(data.personalization_data);
+          }
         }
         
         // Pre-fill form if data exists (for viewing submitted data)
         if (data.personalization_data && Object.keys(data.personalization_data).length > 0) {
           setFormData(data.personalization_data);
+          setSubmittedData(data.personalization_data);
         }
         
       } catch (err) {
@@ -119,7 +131,7 @@ function PersonalizationForm() {
       
       if (pollCount >= STATUS_MAX_POLLS) {
         setIsPollingStatus(false);
-        toast.info('Your storybook is still being generated. Check your email for the final link.');
+        toast.info('Your storybook is still being generated. Please refresh the page in a few minutes.');
         return;
       }
       
@@ -266,6 +278,9 @@ function PersonalizationForm() {
     
     setSubmitting(true);
     
+    // Store the form data for success screen
+    setSubmittedData({ ...formData });
+    
     try {
       const response = await fetch(
         `${API_URL}/api/personalization/session/${token}/submit`,
@@ -325,6 +340,15 @@ function PersonalizationForm() {
     }
   };
   
+  // Copy password to clipboard
+  const copyPassword = () => {
+    const password = submittedData?.view_password;
+    if (password) {
+      navigator.clipboard.writeText(password);
+      toast.success('Password copied to clipboard!');
+    }
+  };
+  
   // Render loading state
   if (loading) {
     return (
@@ -344,7 +368,10 @@ function PersonalizationForm() {
         <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-8 text-center">
           <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Oops!</h2>
-          <p className="text-gray-600">{error}</p>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <p className="text-sm text-gray-500">
+            Need help? Contact us at <a href={`mailto:${SUPPORT_EMAIL}`} className="text-purple-600">{SUPPORT_EMAIL}</a>
+          </p>
         </div>
       </div>
     );
@@ -360,6 +387,9 @@ function PersonalizationForm() {
   // Separate user fields and system fields
   const userFields = fieldDefinitions.filter(f => !f.is_system_field);
   const systemFields = fieldDefinitions.filter(f => f.is_system_field);
+  
+  // Get submitted password for success display
+  const submittedPassword = submittedData?.view_password;
   
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 py-8 px-4">
@@ -390,7 +420,7 @@ function PersonalizationForm() {
                   </h3>
                   <p className="text-yellow-700 text-sm">
                     This storybook template doesn't have any personalization fields set up yet. 
-                    Please contact support or check back later.
+                    Please contact us at <a href={`mailto:${SUPPORT_EMAIL}`} className="underline">{SUPPORT_EMAIL}</a>.
                   </p>
                 </div>
               </div>
@@ -407,25 +437,84 @@ function PersonalizationForm() {
             </div>
           )}
           
-          {/* Generation Complete Banner */}
+          {/* Generation Complete - Success State */}
           {generationComplete && finalViewUrl && (
-            <div className="bg-green-50 border-b border-green-100 px-6 py-6">
-              <div className="flex items-center gap-2 text-green-800 mb-3">
-                <CheckCircle className="w-6 h-6" />
-                <span className="font-semibold text-lg">Your storybook is ready!</span>
+            <div className="p-6 space-y-6">
+              {/* Success Banner */}
+              <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
+                <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                <h2 className="text-2xl font-bold text-green-800 mb-2">Your storybook is ready!</h2>
+                <a 
+                  href={finalViewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-8 py-4 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition-colors mt-2"
+                  data-testid="view-storybook-link"
+                >
+                  <ExternalLink className="w-5 h-5" />
+                  View Your Storybook
+                </a>
               </div>
-              <a 
-                href={finalViewUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition-colors"
-                data-testid="view-storybook-link"
-              >
-                <ExternalLink className="w-5 h-5" />
-                View Your Storybook
-              </a>
-              <p className="text-green-700 text-sm mt-3">
-                A link has also been sent to your email.
+              
+              {/* Password Display */}
+              {submittedPassword && (
+                <div className="bg-purple-50 border border-purple-200 rounded-xl p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Key className="w-5 h-5 text-purple-600" />
+                    <span className="font-semibold text-purple-900">Storybook password</span>
+                  </div>
+                  <div className="flex items-center gap-3 bg-white rounded-lg px-4 py-3 border border-purple-200">
+                    <code className="flex-1 text-lg font-mono text-purple-800 tracking-wider">
+                      {submittedPassword}
+                    </code>
+                    <button
+                      onClick={copyPassword}
+                      className="p-2 hover:bg-purple-100 rounded-lg transition-colors"
+                      title="Copy password"
+                    >
+                      <Copy className="w-5 h-5 text-purple-600" />
+                    </button>
+                  </div>
+                  <p className="text-sm text-purple-700 mt-2">
+                    Save this password to open your storybook later.
+                  </p>
+                </div>
+              )}
+              
+              {/* Personalization Details */}
+              {submittedData && userFields.length > 0 && (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
+                    <h3 className="font-semibold text-gray-800">Your personalization details</h3>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {userFields.map(field => {
+                      const value = submittedData[field.field_key];
+                      if (!value) return null;
+                      
+                      // Handle image values
+                      const displayValue = typeof value === 'object' && value.display_name 
+                        ? value.display_name 
+                        : typeof value === 'string' ? value : '';
+                      
+                      if (!displayValue) return null;
+                      
+                      return (
+                        <div key={field.field_key} className="px-5 py-3 flex justify-between items-start">
+                          <span className="text-gray-600 text-sm">{field.label}</span>
+                          <span className="text-gray-900 font-medium text-sm text-right max-w-[60%]">
+                            {displayValue}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              
+              {/* Support Note */}
+              <p className="text-center text-sm text-gray-500">
+                Need help? Contact us at <a href={`mailto:${SUPPORT_EMAIL}`} className="text-purple-600">{SUPPORT_EMAIL}</a>
               </p>
             </div>
           )}
@@ -454,7 +543,7 @@ function PersonalizationForm() {
                   {session?.status === 'processing' 
                     ? 'Your storybook is being generated...' 
                     : session?.status === 'failed'
-                    ? 'Generation failed. Please contact support.'
+                    ? `Generation failed. Please contact us at ${SUPPORT_EMAIL}`
                     : 'Form submitted. Processing your storybook...'}
                 </span>
               </div>
@@ -470,78 +559,80 @@ function PersonalizationForm() {
             </div>
           )}
           
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="p-6 space-y-6">
-            {/* User-defined fields */}
-            {userFields.map(field => (
-              <FieldInput
-                key={field.field_key}
-                field={field}
-                value={formData[field.field_key]}
-                error={formErrors[field.field_key]}
-                disabled={isLocked}
-                uploading={uploadingField === field.field_key}
-                onChange={(value) => handleInputChange(field.field_key, value)}
-                onUpload={(file) => handleImageUpload(field.field_key, file)}
-                onRemoveImage={() => handleRemoveImage(field.field_key)}
-                token={token}
-              />
-            ))}
-            
-            {/* System fields (like password) - shown in a separate section */}
-            {systemFields.length > 0 && !isLocked && (
-              <div className="border-t border-gray-100 pt-6 mt-6">
-                <h3 className="text-sm font-medium text-gray-500 mb-4">Optional Settings</h3>
-                {systemFields.map(field => (
-                  <FieldInput
-                    key={field.field_key}
-                    field={field}
-                    value={formData[field.field_key]}
-                    error={formErrors[field.field_key]}
-                    disabled={isLocked}
-                    uploading={uploadingField === field.field_key}
-                    onChange={(value) => handleInputChange(field.field_key, value)}
-                    onUpload={(file) => handleImageUpload(field.field_key, file)}
-                    onRemoveImage={() => handleRemoveImage(field.field_key)}
-                    token={token}
-                  />
-                ))}
-              </div>
-            )}
-            
-            {/* Submit Button */}
-            {!isLocked && !hasNoFields && (
-              <div className="pt-4">
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-purple-600 text-white font-semibold rounded-xl hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  data-testid="submit-personalization-btn"
-                >
-                  {submitting ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      Submitting...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-5 h-5" />
-                      Submit & Generate My Storybook
-                    </>
-                  )}
-                </button>
-                <p className="text-center text-xs text-gray-400 mt-3">
-                  By submitting, you confirm all details are correct. This cannot be undone.
-                </p>
-              </div>
-            )}
-          </form>
+          {/* Form - Only show if not complete */}
+          {!generationComplete && (
+            <form onSubmit={handleSubmit} className="p-6 space-y-6">
+              {/* User-defined fields */}
+              {userFields.map(field => (
+                <FieldInput
+                  key={field.field_key}
+                  field={field}
+                  value={formData[field.field_key]}
+                  error={formErrors[field.field_key]}
+                  disabled={isLocked}
+                  uploading={uploadingField === field.field_key}
+                  onChange={(value) => handleInputChange(field.field_key, value)}
+                  onUpload={(file) => handleImageUpload(field.field_key, file)}
+                  onRemoveImage={() => handleRemoveImage(field.field_key)}
+                  token={token}
+                />
+              ))}
+              
+              {/* System fields (like password) - shown in a separate section */}
+              {systemFields.length > 0 && !isLocked && (
+                <div className="border-t border-gray-100 pt-6 mt-6">
+                  <h3 className="text-sm font-medium text-gray-500 mb-4">Optional Settings</h3>
+                  {systemFields.map(field => (
+                    <FieldInput
+                      key={field.field_key}
+                      field={field}
+                      value={formData[field.field_key]}
+                      error={formErrors[field.field_key]}
+                      disabled={isLocked}
+                      uploading={uploadingField === field.field_key}
+                      onChange={(value) => handleInputChange(field.field_key, value)}
+                      onUpload={(file) => handleImageUpload(field.field_key, file)}
+                      onRemoveImage={() => handleRemoveImage(field.field_key)}
+                      token={token}
+                    />
+                  ))}
+                </div>
+              )}
+              
+              {/* Submit Button */}
+              {!isLocked && !hasNoFields && (
+                <div className="pt-4">
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-purple-600 text-white font-semibold rounded-xl hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    data-testid="submit-personalization-btn"
+                  >
+                    {submitting ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-5 h-5" />
+                        Submit & Generate My Storybook
+                      </>
+                    )}
+                  </button>
+                  <p className="text-center text-xs text-gray-400 mt-3">
+                    By submitting, you confirm all details are correct. This cannot be undone.
+                  </p>
+                </div>
+              )}
+            </form>
+          )}
         </div>
         
         {/* Footer */}
         <div className="text-center mt-8">
           <p className="text-sm text-gray-500">
-            Made with love by <span className="text-purple-600 font-medium">Storybook Vault</span>
+            Made with love by <span className="text-purple-600 font-medium">{BRAND_NAME}</span>
           </p>
         </div>
       </div>
