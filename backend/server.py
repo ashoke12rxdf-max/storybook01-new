@@ -1494,6 +1494,44 @@ async def get_session_by_checkout(checkout_id: str):
 
 
 @api_router.get("/personalization/session/{token}")
+async def get_personalization_session(token: str):
+    """
+    Get personalization session data for the customer form.
+    Returns field definitions and current status.
+    """
+    try:
+        session = await session_manager.get_session_by_token(token)
+        
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Check expiration
+        if session.get("status") == "expired":
+            raise HTTPException(status_code=410, detail="Session has expired")
+        
+        # Build response (don't expose internal IDs to customer)
+        template_snapshot = session.get("template_snapshot", {})
+        
+        response = {
+            "session_token": session["session_token"],
+            "product_title": template_snapshot.get("title", "Your Storybook"),
+            "product_slug": session.get("product_slug"),
+            "field_definitions": template_snapshot.get("field_definitions", []),
+            "status": session.get("status"),
+            "form_locked": session.get("form_locked", False),
+            "personalization_data": session.get("personalization_data", {}),
+            "order_reference": session.get("order_id", "")[-8:].upper(),  # Last 8 chars as friendly reference
+            "customer_view_url": session.get("customer_view_url")
+        }
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching session: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch session")
+
 # ============================================================================
 # ADMIN: PERSONALIZATION SESSION LIST + RESEND EMAIL
 # ============================================================================
@@ -1535,45 +1573,7 @@ async def admin_resend_email(token: str, background_tasks: BackgroundTasks):
     except Exception as e:
         logger.error(f"Resend email failed for token {token}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to resend email")
-async def get_personalization_session(token: str):
-    """
-    Get personalization session data for the customer form.
-    Returns field definitions and current status.
-    """
-    try:
-        session = await session_manager.get_session_by_token(token)
         
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        # Check expiration
-        if session.get("status") == "expired":
-            raise HTTPException(status_code=410, detail="Session has expired")
-        
-        # Build response (don't expose internal IDs to customer)
-        template_snapshot = session.get("template_snapshot", {})
-        
-        response = {
-            "session_token": session["session_token"],
-            "product_title": template_snapshot.get("title", "Your Storybook"),
-            "product_slug": session.get("product_slug"),
-            "field_definitions": template_snapshot.get("field_definitions", []),
-            "status": session.get("status"),
-            "form_locked": session.get("form_locked", False),
-            "personalization_data": session.get("personalization_data", {}),
-            "order_reference": session.get("order_id", "")[-8:].upper(),  # Last 8 chars as friendly reference
-            "customer_view_url": session.get("customer_view_url")
-        }
-        
-        return response
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching session: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch session")
-
-
 @api_router.post("/personalization/session/{token}/submit")
 async def submit_personalization(
     token: str, 
