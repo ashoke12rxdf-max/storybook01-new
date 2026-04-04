@@ -53,8 +53,10 @@ app = FastAPI()
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
-# JWT Secret
-JWT_SECRET = os.environ.get('JWT_SECRET', 'storybook-vault-secret-key-2024')
+# JWT Secret - REQUIRED for production security
+JWT_SECRET = os.environ.get('JWT_SECRET')
+if not JWT_SECRET:
+    raise ValueError("JWT_SECRET environment variable is required")
 
 # Upload directories
 UPLOAD_DIR = ROOT_DIR / "uploads"
