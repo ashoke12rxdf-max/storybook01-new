@@ -1532,47 +1532,7 @@ async def get_personalization_session(token: str):
         logger.error(f"Error fetching session: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch session")
 
-# ============================================================================
-# ADMIN: PERSONALIZATION SESSION LIST + RESEND EMAIL
-# ============================================================================
 
-@api_router.get("/admin/personalization/sessions")
-async def admin_list_sessions(limit: int = 50, status: Optional[str] = None):
-    """List all personalization sessions for admin dashboard."""
-    try:
-        query = {}
-        if status and status != "all":
-            query["status"] = status
-
-        sessions = await db.personalization_sessions.find(
-            query, {"_id": 0}
-        ).sort("created_at", -1).to_list(limit)
-
-        return {"sessions": sessions, "total": len(sessions)}
-    except Exception as e:
-        logger.error(f"Error listing sessions: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to list sessions")
-
-
-@api_router.post("/admin/personalization/sessions/{token}/resend-email")
-async def admin_resend_email(token: str, background_tasks: BackgroundTasks):
-    """Resend personalization link email to the customer."""
-    try:
-        session = await session_manager.get_session_by_token(token)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        if session.get("status") in ["completed", "expired"]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot resend email — session is {session['status']}"
-            )
-        background_tasks.add_task(send_personalization_email, token)
-        return {"success": True, "message": "Email queued for delivery"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Resend email failed for token {token}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to resend email")
         
 @api_router.post("/personalization/session/{token}/submit")
 async def submit_personalization(
