@@ -257,8 +257,10 @@ class ProcessingLogEntry(BaseModel):
 
 class CustomerData(BaseModel):
     """Customer information from webhook"""
-    requestedName: str
-    buyerFullName: str
+    # FIX: requestedName is Optional because Polar webhooks don't always send it.
+    # For personalization-flow orders, the name is collected via the form instead.
+    requestedName: Optional[str] = None
+    buyerFullName: Optional[str] = None
     customerEmail: str
     password: Optional[str] = None
     customFields: Dict = {}
