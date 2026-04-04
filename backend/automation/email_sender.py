@@ -1,7 +1,9 @@
 import os
 import logging
 import resend
+import asyncio
 from typing import Optional
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +13,12 @@ resend.api_key = os.getenv("RESEND_API_KEY", "")
 # Brand constants
 BRAND_NAME = "Keepsake Gifts"
 SUPPORT_EMAIL = "orchidsplanner@gmail.com"
+
+
+def _send_email_sync(params: dict) -> dict:
+    """Synchronous wrapper for resend.Emails.send — run via executor."""
+    return resend.Emails.send(params)
+
 
 class EmailSender:
     """Handles email delivery for storybook orders - Keepsake Gifts branding"""
@@ -26,23 +34,21 @@ class EmailSender:
         """
         Send email with personalization form link after successful payment.
         This is the ONLY email sent after purchase.
-        
-        Args:
-            to_email: Customer's email address
-            customer_name: Customer's name (if available)
-            product_title: Title of the storybook product
-            personalization_url: Full URL to the personalization form
-            order_id: Order ID for logging
-            
-        Returns:
-            True if email sent successfully, False otherwise
         """
         try:
+            api_key = os.getenv("RESEND_API_KEY", "")
+            if not api_key:
+                logger.warning("[EMAIL] RESEND_API_KEY not configured — skipping email")
+                return False
+
             email_from = os.getenv("FROM_EMAIL")
             if not email_from:
-                logger.warning("FROM_EMAIL not configured")
+                logger.warning("[EMAIL] FROM_EMAIL not configured — skipping email")
                 return False
-            
+
+            # Refresh key in case env was loaded after module init
+            resend.api_key = api_key
+
             html_content = f"""
 <!DOCTYPE html>
 <html>
@@ -72,7 +78,7 @@ class EmailSender:
                         <td style="padding: 50px 40px;">
                             
                             <p style="margin: 0 0 25px 0; color: #4b5563; font-size: 16px; line-height: 1.7;">
-                                Hi there,
+                                Hi{f' {customer_name}' if customer_name else ''},
                             </p>
                             
                             <p style="margin: 0 0 25px 0; color: #4b5563; font-size: 16px; line-height: 1.7;">
@@ -130,8 +136,8 @@ class EmailSender:
 </body>
 </html>
 """
-            
-            text_content = f"""Hi there,
+
+            text_content = f"""Hi{f' {customer_name}' if customer_name else ''},
 
 Thank you for your order. Your keepsake storybook is almost ready — we just need a few details from you.
 
@@ -147,23 +153,28 @@ If you need help, contact us at {SUPPORT_EMAIL}.
 With love,
 {BRAND_NAME}
 """
-            
+
             params = {
                 "from": f"{BRAND_NAME} <{email_from}>",
                 "to": [to_email],
-                "subject": f"Complete your storybook personalization",
+                "subject": "Complete your storybook personalization",
                 "html": html_content,
                 "text": text_content,
             }
-            
-            email = resend.Emails.send(params)
-            logger.info(f"Personalization link email sent to {to_email}: {email}")
+
+            # FIX: resend.Emails.send() is a BLOCKING/synchronous call.
+            # Running it directly inside an async function blocks the event loop.
+            # We offload it to a thread pool executor so FastAPI stays responsive.
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, partial(_send_email_sync, params))
+
+            logger.info(f"[EMAIL SENT] Personalization link sent to {to_email}: id={result.get('id', result)}")
             return True
-            
+
         except Exception as e:
-            logger.error(f"Failed to send personalization link email to {to_email}: {str(e)}")
+            logger.error(f"[EMAIL ERROR] Failed to send personalization link to {to_email}: {str(e)}")
             return False
-    
+
     @staticmethod
     async def send_storybook_delivery_email(
         to_email: str,
