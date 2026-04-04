@@ -9,21 +9,29 @@ function AutomationOrders({ standalone = true }) {
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showSimulator, setShowSimulator] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
 
   const fetchOrders = useCallback(async () => {
+    setError(null);
     try {
       const url = statusFilter === 'all' 
         ? `${API_URL}/api/automation/orders`
         : `${API_URL}/api/automation/orders?status=${statusFilter}`;
       const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
       const data = await response.json();
-      setOrders(data.orders);
-    } catch (error) {
-      console.error('Failed to fetch orders:', error);
-      toast.error('Failed to load orders');
+      // Guard: backend may return { orders: [...] } or just [...]
+      setOrders(Array.isArray(data) ? data : (data.orders || []));
+    } catch (err) {
+      console.error('Failed to fetch orders:', err);
+      setError(err.message);
+      setOrders([]);
+      toast.error('Failed to load orders: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -153,6 +161,18 @@ function AutomationOrders({ standalone = true }) {
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
             <p className="text-gray-600 mt-4">Loading orders...</p>
+          </div>
+        ) : error ? (
+          <div className="text-center py-12 bg-white rounded-xl shadow-sm border border-red-200">
+            <AlertCircle size={48} className="mx-auto text-red-400 mb-4" />
+            <p className="text-red-600 text-lg font-semibold">Failed to load orders</p>
+            <p className="text-gray-500 text-sm mt-2 font-mono">{error}</p>
+            <button
+              onClick={fetchOrders}
+              className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2 mx-auto"
+            >
+              <RefreshCw size={16} /> Retry
+            </button>
           </div>
         ) : orders.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-xl shadow-sm">
@@ -393,7 +413,7 @@ function OrderDetailsModal({ order, onClose, onRetry, getStatusBadge }) {
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-3">Processing Timeline</h3>
             <div className="space-y-3">
-              {order.processingLog?.map((log, idx) => (
+              {(order.processingLog || []).map((log, idx) => (
                 <div key={idx} className="flex gap-4">
                   <div className="flex flex-col items-center">
                     <div className={`w-3 h-3 rounded-full ${
@@ -402,7 +422,7 @@ function OrderDetailsModal({ order, onClose, onRetry, getStatusBadge }) {
                       log.status === 'processing' ? 'bg-blue-500' :
                       'bg-gray-400'
                     }`} />
-                    {idx < order.processingLog.length - 1 && (
+                    {idx < (order.processingLog || []).length - 1 && (
                       <div className="w-0.5 h-full bg-gray-200 mt-1" />
                     )}
                   </div>
