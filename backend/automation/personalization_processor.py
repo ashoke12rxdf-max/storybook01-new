@@ -321,54 +321,24 @@ class PersonalizationProcessor:
                         font_file = candidate
 
                 # Insert text box
-                # ALTERNATIVE FIX: Use insert_htmlbox for better line height control
-# HTML/CSS provides more reliable line spacing than insert_textbox
-
-# Calculate line-height in CSS units (em or pixels)
-line_height_css = f"{line_height}em"
-
-# Build HTML with inline CSS
-html_text = f"""
-<div style="
-    font-family: {font_family};
-    font-size: {font_size_pdf}pt;
-    color: {self._rgb_to_hex(color)};
-    text-align: {align};
-    line-height: {line_height_css};
-    font-weight: {block.get('font_weight', 'normal')};
-    font-style: {'italic' if block.get('italic') else 'normal'};
-">
-{text.replace('\n', '<br>')}
-</div>
-"""
+insert_kwargs = dict(
+    fontsize=font_size_pdf,
+    color=color,
+    align=align,
+    lineheight=line_height,
+)
+if font_file:
+    insert_kwargs.update(fontfile=font_file, fontname="custom")
+else:
+    insert_kwargs["fontname"] = self._get_fitz_fontname(font_family, block)
 
 try:
-    # Use insert_htmlbox for better CSS control
-    if font_file:
-        # For custom fonts, we still need insert_textbox
-        insert_kwargs = dict(
-            fontfile=font_file,
-            fontname="custom",
-            fontsize=font_size_pdf,
-            color=color,
-            align=align,
-            lineheight=line_height,
-            render_mode=0,
-        )
-        page.insert_textbox(rect, text, **insert_kwargs)
-    else:
-        # For built-in fonts, use htmlbox for better rendering
-        page.insert_htmlbox(
-            rect,
-            html_text,
-            css=None,  # Inline styles used instead
-        )
-        
+    page.insert_textbox(rect, text, **insert_kwargs)
 except Exception as e:
     logger.warning(
-        f"Text insertion failed for block {block.get('block_id')}: {e}"
+        f"insert_textbox failed for block {block.get('block_id')} "
+        f"(font={font_family}): {e} — retrying with Helvetica"
     )
-    # Fallback to basic textbox
     page.insert_textbox(
         rect, text,
         fontname=self._get_fitz_fontname("Helvetica", block),
@@ -382,13 +352,7 @@ except Exception as e:
             logger.info(
                 f"Overlaid {len(spread_blocks)} spread blocks onto PDF → {output_path}"
             )
-@staticmethod
-def _rgb_to_hex(rgb_tuple: tuple) -> str:
-    """Convert fitz RGB tuple (0.0-1.0) back to hex color"""
-    r = int(rgb_tuple[0] * 255)
-    g = int(rgb_tuple[1] * 255)
-    b = int(rgb_tuple[2] * 255)
-    return f"#{r:02x}{g:02x}{b:02x}"
+
         finally:
             doc.close()
 
