@@ -1013,98 +1013,54 @@ async def process_polar_order_background(order_id: str):
 
 
 async def send_personalization_email(session_token: str):
-    """Background task to send personalization link email to customer"""
+    """Background task to send personalization link email to customer.
+
+    Delegates to EmailSender.send_personalization_link_email so there is a
+    single email-sending implementation.  Used by the admin resend endpoint.
+    """
     try:
+        from automation.email_sender import EmailSender
+
         session = await session_manager.get_session_by_token(session_token)
         if not session:
             logger.error(f"[EMAIL] Session not found for token: {session_token}")
             return
-        
+
         customer_email = session.get("customer_email")
         if not customer_email:
             logger.error(f"[EMAIL] No customer email in session {session_token}")
             return
-        
-        customer_name = session.get("customer_name") or "Friend"
-        product_title = session.get("template_snapshot", {}).get("title", "Your Storybook")
-        
-        # Build personalization URL
+
+        customer_name = session.get("customer_name") or ""
+        product_title = session.get("template_snapshot", {}).get("title", "Storybook")
+
         base_url = os.getenv("APP_BASE_URL", "").strip().strip('"').rstrip('/')
         if not base_url:
             base_url = "http://localhost:3000"
         personalization_url = f"{base_url}/personalize/{session_token}"
-        
+
         logger.info(f"[EMAIL] Sending to {customer_email} | url={personalization_url}")
-        
-        html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="text-align: center; margin-bottom: 30px;">
-                <h1 style="color: #6B46C1;">Storybook Vault</h1>
-            </div>
-            <h2>Hi {customer_name}!</h2>
-            <p>Thank you for your purchase! Your personalized storybook <strong>{product_title}</strong> is almost ready.</p>
-            <p>To complete your storybook, please fill in the personalization details:</p>
-            <div style="text-align: center; margin: 30px 0;">
-                <a href="{personalization_url}" 
-                   style="background-color: #6B46C1; color: white; padding: 15px 30px; 
-                          text-decoration: none; border-radius: 8px; font-weight: bold;">
-                    Personalize Your Storybook
-                </a>
-            </div>
-            <p style="color: #666; font-size: 14px;">Or copy this link: {personalization_url}</p>
-            <p style="color: #666; font-size: 14px; margin-top: 30px;">
-                Note: You can only submit the form once, so please make sure all details are correct before submitting.
-            </p>
-            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-            <p style="color: #999; font-size: 12px; text-align: center;">Made with love by Storybook Vault</p>
-        </body>
-        </html>
-        """
-        
-        text_content = f"""Hi {customer_name}!
 
-Thank you for your purchase! Your personalized storybook "{product_title}" is almost ready.
+        email_sent = await EmailSender.send_personalization_link_email(
+            to_email=customer_email,
+            customer_name=customer_name,
+            product_title=product_title,
+            personalization_url=personalization_url,
+            order_id=session.get("external_order_id", "")
+        )
 
-To complete your storybook, please visit:
-{personalization_url}
-
-Note: You can only submit the form once.
-
-Made with love by Storybook Vault"""
-        
-        import resend
-        resend.api_key = os.getenv("RESEND_API_KEY", "").strip()
-        if not resend.api_key:
-            logger.error("[EMAIL] RESEND_API_KEY not configured — cannot send personalization email")
-            return
-        
-        email_from = os.getenv("FROM_EMAIL", "noreply@example.com").strip()
-        params: resend.Emails.SendParams = {
-            "from": f"Storybook Vault <{email_from}>",
-            "to": [customer_email],
-            "subject": f"Personalize your storybook — {product_title}",
-            "html": html_content,
-            "text": text_content
-        }
-        
-        response = resend.Emails.send(params)
-        email_id = response.get("id") if isinstance(response, dict) else getattr(response, "id", None)
-        
-        if email_id:
-            logger.info(f"[EMAIL] Sent ✓ resend_id={email_id} to {customer_email} for session {session_token}")
-            # Update session with email status
+        if email_sent:
             await db.personalization_sessions.update_one(
                 {"session_token": session_token},
                 {"$set": {
                     "email_sent": True,
                     "email_sent_at": datetime.now(timezone.utc).isoformat(),
-                    "resend_email_id": email_id
                 }}
             )
+            logger.info(f"[EMAIL] Sent ✓ to {customer_email} for session {session_token}")
         else:
-            logger.error(f"[EMAIL] Send returned no ID. Response: {response}")
-            
+            logger.error(f"[EMAIL] Failed for session {session_token} — check RESEND_API_KEY and FROM_EMAIL env vars")
+
     except Exception as e:
         logger.error(
             f"[EMAIL] Failed for session {session_token}: {type(e).__name__}: {str(e)}",
@@ -1255,17 +1211,13 @@ async def polar_webhook(request: Request, background_tasks: BackgroundTasks):
             
             # Check if this requires personalization
             if result.get("requiresPersonalization"):
-                # PERSONALIZATION FLOW: Session created, customer must fill form
+                # PERSONALIZATION FLOW: Session created, customer must fill form.
+                # Email is sent inside webhook_handler._handle_personalization_flow
+                # via EmailSender — no duplicate send needed here.
                 event_log["processingStatus"] = "awaiting_personalization"
                 event_log["sessionToken"] = result.get("sessionToken")
                 await db.webhook_events.insert_one(event_log)
-                
-                # Send personalization link email
-                background_tasks.add_task(
-                    send_personalization_email,
-                    result.get("sessionToken")
-                )
-                
+
                 return {
                     "received": True,
                     "message": "Personalization session created - awaiting customer input",
